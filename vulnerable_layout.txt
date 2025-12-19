@@ -1,62 +1,58 @@
 scada-maint-vulnerable/
-├── README.md
-├── requirements.txt
-├── manage.py
 ├── Dockerfile
 ├── docker-compose.yml
 ├── entrypoint.sh
+├── requirements.txt
+├── manage.py
+├── README.md
 │
 ├── scada_maint/
 │   ├── __init__.py
-│   ├── settings.py
-│   ├── urls.py
+│   ├── settings.py          # DB, MEDIA_ROOT/URL, installed apps, middleware
+│   ├── urls.py              # include portal.urls + serve media in dev
 │   └── wsgi.py
 │
-├── apps/
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── admin.py
-│   │   ├── models.py          # Device/Technician/Assignments/Logs/Reports/Scripts
-│   │   ├── urls.py
-│   │   ├── views.py           # SCADA features + ALL vulnerable endpoints
-│   │   └── migrations/
-│   │       └── __init__.py
-│   │
-│   └── monitoring/
-│       ├── __init__.py
-│       ├── models.py          # SecurityEvent
-│       ├── middleware.py      # logs every request + classify attack type
-│       ├── urls.py
-│       ├── views.py           # monitoring dashboard + per-vuln pages
-│       └── migrations/
-│           └── __init__.py
+├── portal/
+│   ├── __init__.py
+│   ├── admin.py
+│   ├── apps.py
+│   ├── models.py            # Device, Technician, Assignment, Logs, Reports, Scripts, SecurityEvent
+│   ├── urls.py              # SCADA pages + each vuln endpoint + monitoring pages
+│   ├── views.py             # all logic (maintenance ops + vuln pages + monitoring)
+│   ├── middleware.py        # logs every request -> SecurityEvent + attack classification
+│   ├── migrations/
+│   │   └── __init__.py
+│   └── management/
+│       └── commands/
+│           └── seed.py      # creates >=100 records per SQL table
 │
-├── templates/
-│   ├── base.html
-│   ├── login.html
-│   ├── dashboard.html
-│   ├── devices.html
-│   ├── logs.html
-│   ├── diagnostics.html
-│   ├── vuln_idor.html
-│   ├── vuln_deserialize.html
-│   ├── vuln_overwrite.html
-│   ├── vuln_tempfiles.html
-│   ├── vuln_upload.html
-│   ├── vuln_ssrf.html
-│   ├── vuln_xxe.html
-│   ├── vuln_sqli_auth_bypass.html
-│   ├── vuln_sqli_exfil.html
-│   ├── monitoring_dashboard.html
-│   ├── monitoring_idor.html
-│   ├── monitoring_deserialize.html
-│   ├── monitoring_overwrite.html
-│   ├── monitoring_tempfiles.html
-│   ├── monitoring_upload.html
-│   ├── monitoring_ssrf.html
-│   ├── monitoring_xxe.html
-│   └── monitoring_sqli.html
-│
-└── management/
-    └── commands/
-        └── seed.py            # creates >=100 records per SQL table
+└── templates/
+    ├── base.html
+    ├── login.html
+    │
+    ├── dashboard.html               # SCADA main
+    ├── devices.html                 # shows devices + maintenance status + lockout/tagout
+    ├── device_detail.html           # place in maintenance / release lock / assign tech
+    ├── assignments.html             # technician assignments view
+    ├── logs.html                    # maintenance start/end + isolation + technician access
+    ├── diagnostics.html             # remote diagnostics portal landing
+    │
+    ├── vuln_idor.html               # A
+    ├── vuln_deserialize.html        # B
+    ├── vuln_overwrite.html          # C (upload overwrites by filename)
+    ├── vuln_tempfiles.html          # D (predictable PDF temp name)
+    ├── vuln_upload.html             # E (dangerous file upload)
+    ├── vuln_ssrf.html               # F
+    ├── vuln_xxe.html                # G
+    ├── vuln_sqli_auth_bypass.html   # CVE scenario 1
+    ├── vuln_sqli_exfil.html         # CVE scenario 2
+    │
+    ├── monitoring_dashboard.html    # monitoring overview
+    ├── monitoring_idor.html         # per-vuln monitoring page
+    ├── monitoring_deserialize.html
+    ├── monitoring_overwrite.html
+    ├── monitoring_tempfiles.html
+    ├── monitoring_upload.html
+    ├── monitoring_ssrf.html
+    ├── monitoring_xxe.html
+    └── monitoring_sqli.html
