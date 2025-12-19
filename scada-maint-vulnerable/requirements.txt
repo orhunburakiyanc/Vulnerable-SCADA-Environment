@@ -1,0 +1,17 @@
+# Web framework
+Django==5.1.0
+
+# PostgreSQL driver (for docker-compose Postgres)
+psycopg2-binary==2.9.9
+
+# Seed script: generate 100+ realistic records fast
+Faker==30.8.2
+
+# SSRF endpoint will use this to fetch URLs (vulnerable on purpose)
+requests==2.32.3
+
+# XXE demo: lxml can be used in an insecure configuration intentionally
+lxml==5.2.2
+
+# Optional but useful: create simple PDF files for the "unsafe temp files" vuln (D)
+reportlab==4.2.5
