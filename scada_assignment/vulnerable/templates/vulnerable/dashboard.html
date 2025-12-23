@@ -28,6 +28,7 @@
             <th scope="col">IP Address</th>
             <th scope="col">Status</th>
             <th scope="col">Locked Out?</th>
+            <th scope="col">Action</th>
           </tr>
         </thead>
 
@@ -51,10 +52,16 @@
                 <span class="lock lock-no">No</span>
               {% endif %}
             </td>
+
+            <td>
+              <a href="{% url 'toggle_status' device.id %}">
+                <button type="button">Toggle Maintenance</button>
+              </a>
+            </td>
           </tr>
           {% empty %}
           <tr>
-            <td colspan="4" class="empty">
+            <td colspan="5" class="empty">
               No devices found.
             </td>
           </tr>
@@ -291,6 +298,29 @@
     padding: 18px 14px;
   }
 
+  /* Optional: make the action button match the UI a bit */
+  .scada-table button{
+    appearance: none;
+    border: 1px solid rgba(29,78,216,0.25);
+    background: rgba(29,78,216,0.10);
+    color: var(--blue-600);
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: transform .06s ease, background .15s ease, border-color .15s ease;
+    white-space: nowrap;
+  }
+
+  .scada-table button:hover{
+    background: rgba(29,78,216,0.14);
+    border-color: rgba(29,78,216,0.35);
+  }
+
+  .scada-table button:active{
+    transform: translateY(1px);
+  }
+
   /* Responsive */
   @media (max-width: 600px){
     .dash-title h2{ font-size: 1.3rem; }
@@ -299,6 +329,7 @@
   }
 
   @media (prefers-reduced-motion: reduce){
+    .scada-table button{ transition: none; }
     .scada-table tbody tr:hover{ background: inherit; }
   }
 </style>

@@ -150,3 +150,16 @@ def vulnerable_report(request):
     # Return the file to the user
     # Ideally, we should stream it without saving, or use a unique temp name.
     return FileResponse(open(temp_filename, 'rb'), as_attachment=True, filename=f"report_{report_id}.pdf")
+
+# CAPABILITY: Place device in maintenance / Release lock
+def toggle_status(request, device_id):
+    device = Device.objects.get(id=device_id)
+    # Simple toggle logic
+    if device.status == 'Operational':
+        device.status = 'Maintenance'
+        device.is_locked_out = True
+    else:
+        device.status = 'Operational'
+        device.is_locked_out = False
+    device.save()
+    return redirect('vulnerable_dashboard')
