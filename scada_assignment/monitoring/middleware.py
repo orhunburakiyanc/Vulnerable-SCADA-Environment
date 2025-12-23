@@ -7,7 +7,6 @@ class SecurityMonitorMiddleware:
 
     def __call__(self, request):
         # 1. Capture the full URL (Query parameters included)
-        # This gets "/vulnerable/login/?username=hacker&is_admin=True"
         full_path = request.get_full_path()
         
         # 2. Capture POST body (for form submissions)
@@ -16,15 +15,19 @@ class SecurityMonitorMiddleware:
         except:
             body_content = ""
 
-        # Combine them to search everything
-        search_space = f"{full_path} | {body_content}"
+        # --- DÜZELTME BURADA YAPILDI ---
+        # Eski hatalı kod: search_space = f"{full_path} | {body_content}"
+        # Yeni kod: Araya ' | ' yerine ' RAW_BODY: ' gibi zararsız bir metin koyduk.
+        # Böylece regex kuralı kendi kendisini tetiklemez.
+        search_space = f"{full_path} RAW_BODY: {body_content}"
 
         # 3. Define Attack Signatures (Regex patterns)
         signatures = {
-            'Auth Bypass': r"(?i)(superuser=|is_admin=|admin=true)", # Matches is_admin=
+            'Auth Bypass': r"(?i)(superuser=|is_admin=|admin=true)", 
             'SQL Injection': r"(?i)(UNION\s+SELECT|OR\s+1=1|connector=OR|--)",
             'XSS / Scripting': r"(?i)(<script>|alert\(|javascript:)",
             'Path Traversal / XXE': r"(?i)(\.\./|/etc/passwd|<!ENTITY)",
+            # Command Injection pattern looks for | character, so we removed it from search_space construction
             'Command Injection': r"(?i)(; ls|&&|\|)",
         }
 

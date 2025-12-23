@@ -1,5 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
+import pickle
+import base64
 
 # 1. Device Model (The machines you control)
 class Device(models.Model):
@@ -29,3 +31,32 @@ class DiagnosticReport(models.Model):
     file_path = models.CharField(max_length=255)
     content = models.TextField() # We store text content here for the XXE/Deserialization demos
     created_at = models.DateTimeField(auto_now_add=True)
+
+# 4. Diagnostic Result (Deserialization Vulnerability)
+class DiagnosticResult(models.Model):
+    """
+    Vulnerability B: Deserialization Bug
+    Uses pickle for serialization - DANGEROUS!
+    """
+    # Establishing a connection to DiagnosticReport 
+    report = models.ForeignKey(DiagnosticReport, on_delete=models.CASCADE, related_name='results')
+    serialized_data = models.TextField(help_text='Base64-encoded pickle data')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def set_data(self, data_dict):
+        """Serialize data using pickle (VULNERABLE)"""
+        pickled = pickle.dumps(data_dict)
+        self.serialized_data = base64.b64encode(pickled).decode('utf-8')
+
+    def get_data(self):
+        """
+        VULNERABLE: Deserialize using pickle
+        Corrupted/malicious payload can crash or execute code!
+        """
+        if not self.serialized_data:
+            return None
+        try:
+            decoded = base64.b64decode(self.serialized_data)
+            return pickle.loads(decoded)  # VULNERABLE!
+        except Exception as e:
+            return str(e)

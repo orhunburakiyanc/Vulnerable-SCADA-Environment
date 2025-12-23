@@ -7,4 +7,6 @@ urlpatterns = [
     path('upload/', views.vulnerable_upload, name='vulnerable_upload'), 
     path('report/', views.vulnerable_report, name='vulnerable_report'),
     path('toggle/<int:device_id>/', views.toggle_status, name='toggle_status'),
+    path('deserialize/', views.vulnerable_deserialize, name='vulnerable_deserialize'),
+    path('ssrf/', views.vulnerable_ssrf, name='vulnerable_ssrf'),
 ]

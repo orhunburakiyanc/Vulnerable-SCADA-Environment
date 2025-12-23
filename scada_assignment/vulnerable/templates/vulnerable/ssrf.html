@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Node Status Checker | SCADA</title>
+</head>
+
+<body style="margin: 0; font-family: sans-serif; background: #f6f7fb;">
+
+<div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 1000;">
+    <div style="font-weight: 900; color: #1d4ed8; font-size: 1.2rem;">
+        SCADA SYSTEM
+    </div>
+    <div style="display: flex; gap: 15px;">
+        <a href="{% url 'vulnerable_dashboard' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Dashboard</a>
+        <a href="{% url 'vulnerable_upload' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Upload</a>
+        <a href="{% url 'vulnerable_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics</a>
+        <a href="{% url 'monitoring' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Logs (SOC)</a>
+        <a href="{% url 'vulnerable_ssrf' %}" style="text-decoration: none; color: #1d4ed8; font-weight: 600; font-size: 0.9rem; background: rgba(29, 78, 216, 0.05); padding: 5px 10px; border-radius: 6px;">Node Check (SSRF)</a>
+        <a href="{% url 'vulnerable_login' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Exit / Login</a>
+    </div>
+</div>
+
+<section style="padding: 20px; max-width: 800px; margin: 0 auto;">
+    <h2>Remote Node Status Checker</h2>
+    <p style="color: #666;">Enter the URL of a remote SCADA sensor to fetch its health status.</p>
+    
+    <div style="background: white; padding: 20px; border-radius: 10px; border: 1px solid #ddd;">
+        <form method="post">
+            {% csrf_token %}
+            <label style="font-weight: bold;">Remote Node URL:</label>
+            <input type="text" name="url" placeholder="http://192.168.1.50/status" style="width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px;">
+            <button type="submit" style="background: #1d4ed8; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">Check Status</button>
+        </form>
+
+        <h3 style="margin-top: 20px;">Response:</h3>
+        <pre style="background: #f1f5f9; padding: 15px; border-radius: 5px; overflow-x: auto;">{{ content }}</pre>
+    </div>
+</section>
+
+</body>
+</html>

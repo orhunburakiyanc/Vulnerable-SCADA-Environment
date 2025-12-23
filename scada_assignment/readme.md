@@ -1,7 +1,7 @@
 # SCADA Security Assignment - Read Me Or Fail
 
-**Author:** Defalt
-**Date:** 2025-12-23  
+**Author:** Defalt, orhunburakiyanc
+**Date:** 2025-12-23 (Updated)
 **Kernel:** Django 5.x on Python 3.x
 
 ## What is this garbage?
@@ -10,9 +10,9 @@ This is a SCADA simulation environment. It's not real SCADA, obviously, because 
 
 I built this with three distinct components because I hate monolithic messes:
 
-1. **`vulnerable`**: This app is a disaster. It has every hole in the book (SQLi, IDOR, XXE, SSRF). It's written like a junior dev's first commit on a Friday afternoon.
-2. **`patched`**: This is how code *should* be written. Input sanitization, parameterized queries, CSRF protection. It actually works.
-3. **`monitoring`**: A middleware layer that sits between the user and the server. It watches traffic. If it sees you trying to inject SQL, it logs you.
+1. **`vulnerable`**: This app is a disaster. It has every hole in the book (SQLi, IDOR, XXE, Deserialization, and now **SSRF**). It's written like a junior dev's first commit on a Friday afternoon.
+2. **`patched`**: This is how code *should* be written. Input sanitization, parameterized queries, CSRF protection, and session management. It actually works.
+3. **`monitoring`**: A middleware layer that sits between the user and the server. It watches traffic. If it sees you trying to inject SQL, it logs you. I also fixed the regex so it stops flagging normal page navigation as an attack.
 
 ## The Architecture (Don't overcomplicate it)
 
@@ -20,12 +20,14 @@ The structure is simple. Keep it that way.
 
 ```
 scada_assignment/
-├── db.sqlite3          # The database. Don't delete it unless you want to re-run everything.
+├── db.sqlite3          # The database.
 ├── manage.py           # The commander.
-├── core/               # Shared models (Devices, Logs). The backbone.
+├── core/               # Shared models (Devices, Reports). The backbone.
 ├── vulnerable/         # The playground for hackers.
 ├── patched/            # The playground for adults.
-└── monitoring/         # The surveillance state.
+├── monitoring/         # The surveillance state (SOC).
+└── templates/          # HTML files (Now with a proper Navbar, you're welcome).
+
 ```
 
 ## Setup Instructions
@@ -47,68 +49,95 @@ python3 -m venv venv
 source venv/bin/activate
 
 # Install the necessary libraries. 
-# We need 'lxml' for XML parsing and 'reportlab' for PDFs. 'Faker' is for the dummy data.
 pip install django faker lxml requests reportlab
+
 ```
 
-### 2. Database Initialization
+### 2. Database Initialization (CRITICAL)
 
-We need a database. We also need data because an empty database is useless for testing. I wrote a custom command `populate_db` to save you from typing 100 entries manually. You're welcome.
+We need data. I updated the `populate_db` script. It doesn't just create random junk anymore; it creates specific targets for your scenarios (like a hidden **"NUCLEAR-CORE-CONTROLLER"** and an Admin report).
 
 ```bash
-# create the tables
+# Create the tables (including the missing DiagnosticResult table)
 python manage.py makemigrations
 python manage.py migrate
 
-# fill it with junk data (100+ records)
+# Fill it with scenario data
 python manage.py populate_db
+
 ```
 
 ### 3. Run the Thing
 
 ```bash
 python manage.py runserver
+
 ```
 
-If it says `System check identified no issues`, you are good. If it crashes, read the traceback. Python tells you exactly what is wrong.
+## UI Updates
+
+I got tired of typing URLs manually, so I added a **Navbar** to the top of every page.
+
+* **Vulnerable App:** Red/Blue theme.
+* **Patched App:** Green theme (Secure).
 
 ## How to Break It (The Vulnerable App)
 
-Go to these URLs to see bad code in action.
+Go to these URLs (or just use the Navbar) to see bad code in action.
 
-* **Auth Bypass:** `http://127.0.0.1:8000/vulnerable/login/?username=hacker&is_admin=True`
-  * Why: Dictionary expansion in `request.GET`. Stupid.
+* **Auth Bypass:** `/vulnerable/login/?username=hacker&is_admin=True`
+* *Why:* Dictionary expansion in `request.GET`. It trusts whatever you put in the URL.
 
-* **SQL Injection:** `http://127.0.0.1:8000/vulnerable/dashboard/?connector=OR`
-  * Why: Dynamic query building with user input.
 
-* **XXE:** `http://127.0.0.1:8000/vulnerable/upload/`
-  * Why: `resolve_entities=True` in the XML parser. Upload a payload and watch it read `/etc/passwd`.
+* **SQL Injection:** `/vulnerable/dashboard/?connector=OR&is_locked_out=True`
+* *Why:* Dynamic query building.
+* *Visual:* If successful, the hidden **"NUCLEAR-CORE-CONTROLLER"** will appear in the list with a **Red Background**.
 
-* **SSRF:** `http://127.0.0.1:8000/vulnerable/ssrf/`
-  * Why: Blind `requests.get()`.
+
+* **SSRF (New):** `/vulnerable/ssrf/`
+* *Why:* It blindly takes a URL and runs `urllib.request.urlopen()`. Try accessing `http://127.0.0.1:8000/admin/`.
+
+
+* **XXE:** `/vulnerable/upload/`
+* *Why:* `resolve_entities=True` in the XML parser. Upload a malicious XML to read local files.
+
+
+* **Deserialization:** `/vulnerable/deserialize/`
+* *Why:* It accepts Base64 encoded `pickle` data. RCE waiting to happen.
+
+
 
 ## How to Verify It Works (The Patched App)
 
 Go here to see the fixes.
 
-* **Secure Login:** `http://127.0.0.1:8000/patched/login/`
-  * Fix: Explicit field lookup.
+* **Secure Login:** `/patched/login/`
+* *Fix:* Explicit field lookup. Also, I fixed the **Logout** bug—it now actually flushes the session when you hit logout.
 
-* **Secure Dashboard:** `http://127.0.0.1:8000/patched/dashboard/`
-  * Fix: Hardcoded filters.
 
-* **Secure Upload:** `http://127.0.0.1:8000/patched/upload/`
-  * Fix: UUID renaming, extension checks, `resolve_entities=False`.
+* **Secure Dashboard:** `/patched/dashboard/`
+* *Fix:* Hardcoded filters. You can't inject OR conditions anymore.
+
+
+* **Secure SSRF:** `/patched/ssrf/`
+* *Fix:* **Allowlist**. You can only connect to `example.com` or `scada-update-server.com`. Everything else is blocked.
+
+
+* **Secure Diagnostics:** `/patched/diagnostics/`
+* *Fix:* Switched from `pickle` to **JSON**. You can't execute code via JSON.
+
+
 
 ## The Monitoring System
 
-Check `http://127.0.0.1:8000/monitoring/`.
+Check `/monitoring/`.
 
-It uses Middleware (`monitoring/middleware.py`) to regex scan the raw request URL (`request.get_full_path()`). If you trigger an attack on the vulnerable app, it shows up here. If it doesn't show up, you didn't attack hard enough.
+It uses Middleware to regex scan the raw request.
+
+* **Update:** I fixed the logic where it was flagging the internal pipe `|` character as an attack. Now it logs *actual* attacks (SQLi, XSS, Command Injection) without spamming the logs for normal navigation.
 
 ## Final Note
 
-If you restart the computer, just run `source venv/bin/activate` and `python manage.py runserver` again. The database persists in the `db.sqlite3` file.
+If you restart the computer, just run `source venv/bin/activate` and `python manage.py runserver` again. The database persists in `db.sqlite3`.
 
 Now go finish your report.

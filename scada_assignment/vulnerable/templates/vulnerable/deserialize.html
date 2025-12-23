@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remote Diagnostics | SCADA System</title>
+    <style>
+      /* --- CSS STYLES (DASHBOARD ILE AYNI) --- */
+      :root{
+        --bg:#f6f7fb;
+        --surface:#ffffff;
+        --text:#111827;
+        --muted:#6b7280;
+        --border:#e5e7eb;
+        --shadow:0 18px 45px rgba(17,24,39,.10);
+    
+        --blue:#1d4ed8;
+        --blue-600:#1e40af;
+        --ring:rgba(29,78,216,.22);
+    
+        /* Durum Renkleri */
+        --good-bg:rgba(29,78,216,.10);
+        --good-bd:rgba(29,78,216,.20);
+        --good-tx:#1e40af;
+    
+        --warn-bg:rgba(139,30,63,.10);
+        --warn-bd:rgba(139,30,63,.20);
+        --warn-tx:#6f1632;
+      }
+    
+      body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); }
+      *{ box-sizing:border-box; }
+    
+      /* Ana Konteyner */
+      .scada-dash{
+        padding: 22px 16px 30px;
+        background:
+          radial-gradient(900px 450px at 12% 10%, rgba(29,78,216,0.10), transparent 60%),
+          radial-gradient(900px 450px at 88% 20%, rgba(139,30,63,0.10), transparent 60%),
+          linear-gradient(180deg, #fff, var(--bg));
+        color: var(--text);
+        min-height: 100vh;
+      }
+    
+      .dash-header{
+        max-width: 1100px;
+        margin: 0 auto 16px;
+        display:flex;
+        align-items:flex-end;
+        justify-content:space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+    
+      .dash-title h2{ margin:0 0 6px; font-size:1.55rem; letter-spacing:-0.02em; }
+      .sub{ margin:0 0 6px; color: var(--muted); }
+      .meta{ margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--border); color: var(--muted); }
+      .scenario{ margin:0; color: var(--muted); font-size: 0.98rem; }
+    
+      /* Kart Yapısı */
+      .table-card{
+        max-width: 1100px;
+        margin: 0 auto;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+    
+      .table-head{
+        display:flex; align-items:center; justify-content:space-between; gap: 12px;
+        padding: 14px 16px; border-bottom: 1px solid var(--border);
+        background: linear-gradient(180deg, #ffffff, #fbfbfd);
+      }
+      
+      .table-head h3{ margin:0; font-size: 1.05rem; letter-spacing: -0.01em; }
+    
+      .pill{
+        display:inline-flex; align-items:center; padding: 6px 10px;
+        border-radius: 999px; background: rgba(29,78,216,0.08);
+        border: 1px solid rgba(29,78,216,0.15); color: var(--blue-600);
+        font-weight: 700; font-size: 0.85rem;
+      }
+    
+      /* Form Alanı */
+      .card-body{ padding: 24px; }
+      .diag-form{ display: flex; flex-direction: column; gap: 20px; }
+    
+      .form-group label{
+        display: block; font-size: 0.9rem; font-weight: 700; margin-bottom: 8px; color: var(--text);
+      }
+    
+      .scada-input{
+        width: 100%; padding: 12px; border-radius: 10px;
+        border: 1px solid var(--border); background: #f9fafb;
+        color: var(--text); font-size: 0.95rem; transition: all 0.2s ease;
+        resize: vertical;
+      }
+    
+      .scada-input:focus{
+        outline: none; border-color: var(--blue-600); background: #fff;
+        box-shadow: 0 0 0 4px var(--ring);
+      }
+    
+      .mono{ font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+      .help-text{ font-size: 0.85rem; color: var(--muted); margin-top: 6px; }
+    
+      .btn-primary{
+        appearance: none; background: var(--blue-600); color: #fff;
+        border: 1px solid transparent; padding: 12px 24px;
+        border-radius: 10px; font-weight: 700; cursor: pointer;
+        font-size: 1rem; transition: background 0.2s ease;
+      }
+      .btn-primary:hover{ background: var(--blue); }
+    
+      /* Alert Kutuları */
+      .alert-box{ padding: 16px; border-radius: 12px; border: 1px solid; margin-bottom: 24px; }
+      .alert-ok{ background: var(--good-bg); border-color: var(--good-bd); color: var(--good-tx); }
+      .alert-err{ background: var(--warn-bg); border-color: var(--warn-bd); color: var(--warn-tx); }
+    
+      .alert-content{
+        margin-top: 12px; background: rgba(255,255,255,0.4);
+        border-radius: 8px; padding: 12px; border: 1px solid rgba(0,0,0,0.05);
+      }
+    
+      .mono-label{ display: block; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; opacity: 0.8; font-weight: 700; }
+      .terminal-output{ margin: 0; white-space: pre-wrap; word-break: break-all; font-family: ui-monospace, monospace; font-size: 0.9rem; }
+    </style>
+</head>
+<body style="margin: 0; font-family: sans-serif; background: #f6f7fb;">
+
+<div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 1000;">
+    <div style="font-weight: 900; color: #1d4ed8; font-size: 1.2rem;">
+        ⚡ SCADA SYSTEM
+    </div>
+    <div style="display: flex; gap: 15px;">
+        <a href="{% url 'vulnerable_dashboard' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Dashboard</a>
+        <a href="{% url 'vulnerable_upload' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Upload</a>
+        <a href="{% url 'vulnerable_deserialize' %}" style="text-decoration: none; color: #1d4ed8; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(29, 78, 216, 0.05); border-radius: 6px;">Diagnostics</a>
+        <a href="{% url 'monitoring' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Logs (SOC)</a>
+        <a href="{% url 'vulnerable_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check (SSRF)</a>
+        <a href="{% url 'vulnerable_login' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Exit / Login</a>
+    </div>
+</div>
+
+<section class="scada-dash" aria-label="System Diagnostics">
+  
+  <header class="dash-header">
+    <div class="dash-title">
+      <h2>Remote Diagnostics Tool</h2>
+      <p class="sub">
+        Advanced Analysis Module
+        <span class="meta">Protocol: <strong>PYTHON-PICKLE</strong></span>
+      </p>
+      <p class="scenario">Vulnerability B: Upload Base64 encoded serialized objects.</p>
+    </div>
+    <div class="dash-actions">
+        <a href="/vulnerable/dashboard/" style="text-decoration: none;">
+            <button class="btn-primary" style="background: white; color: var(--blue-600); border: 1px solid var(--border);">← Back to Dashboard</button>
+        </a>
+    </div>
+  </header>
+
+  <div class="table-card">
+    <div class="table-head">
+      <h3>Manual Payload Injection</h3>
+      <span class="pill">Status: {% if output %}Executed{% else %}Idle{% endif %}</span>
+    </div>
+
+    <div class="card-body">
+      
+      {% if status %}
+      <div class="alert-box {% if 'CRITICAL' in status or 'Error' in status %}alert-err{% else %}alert-ok{% endif %}">
+        <div class="alert-header">
+            <strong>System Status:</strong> {{ status }}
+        </div>
+        {% if output %}
+        <div class="alert-content">
+            <span class="mono-label">Decoded Output:</span>
+            <pre class="terminal-output">{{ output }}</pre>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <form method="post" class="diag-form">
+        {% csrf_token %}
+        
+        <div class="form-group">
+          <label for="payload">Diagnostic Payload (Base64):</label>
+          <textarea 
+            name="payload" 
+            id="payload" 
+            rows="6" 
+            placeholder="e.g. gASV..." 
+            class="scada-input mono"></textarea>
+          <p class="help-text">Only trusted diagnostic objects are deserialized.</p>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn-primary">Execute Diagnostics</button>
+        </div>
+      </form>
+
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

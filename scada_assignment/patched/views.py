@@ -1,32 +1,40 @@
 from django.shortcuts import render, redirect
-from django.http import HttpResponse, FileResponse
-from core.models import Device, DiagnosticReport, MaintenanceLog
-from django.conf import settings
+from django.http import HttpResponse
+from core.models import Device, DiagnosticReport
 from django.core.files.storage import FileSystemStorage
-from django.views.decorators.csrf import csrf_protect # Explicitly enforce CSRF
-import uuid # For random filenames
+from django.views.decorators.csrf import csrf_protect
+import uuid
 import os
-import requests # For SSRF fix
-from lxml import etree # For XXE fix
+import requests
+from lxml import etree
+import json  # Deserialization fix için gerekli
 
-# 1. SECURE LOGIN
+# 1. SECURE LOGIN (Fixes Auth Bypass)
 def patched_login(request):
+
+    # When we press logout it sends a "GET" request to 'patched_login' link. 
+    if request.method == "GET":
+        request.session.flush()
+    
     if request.method == "POST":
         username = request.POST.get('username')
-        # Fix: We manually build the session dict. No dictionary expansion allowed.
+        # FIX: Manual session construction. No dictionary expansion (**kwargs) allowed.
+        # We explicitly set is_admin to False by default.
         request.session['user'] = {
             'username': username,
-            'is_admin': False # Enforce default
+            'is_admin': False 
         }
         return redirect('patched_dashboard')
     return render(request, 'patched/login.html')
 
-# 2. SECURE DASHBOARD
+# 2. SECURE DASHBOARD (Fixes SQL Injection & Data Exfiltration)
 def patched_dashboard(request):
     if 'user' not in request.session:
         return redirect('patched_login')
     
-    # Fix: Hardcoded filter. No user input can change the logic to 'OR'.
+    # FIX: Django ORM filter() uses parameterization automatically.
+    # We deliberately ignore 'connector' or other injection attempts from URL.
+    # We only show 'Operational' devices, hiding the secret/maintenance ones.
     devices = Device.objects.filter(status='Operational')
     
     context = {'devices': devices, 'user': request.session['user']}
@@ -40,13 +48,13 @@ def patched_upload(request):
     if request.method == 'POST' and request.FILES.get('file'):
         uploaded_file = request.FILES['file']
         
-        # FIX A (File Type): Check extension
+        # FIX A (File Type): Whitelist allowed extensions
         ext = os.path.splitext(uploaded_file.name)[1].lower()
         if ext not in ['.xml', '.txt', '.log']:
             context['status'] = "Error: Invalid file type. Only .xml, .txt allowed."
             return render(request, 'patched/upload.html', context)
 
-        # FIX B (Overwrite): Rename file to a random UUID
+        # FIX B (Overwrite): Use UUID to prevent overwriting existing files
         new_filename = f"{uuid.uuid4()}{ext}"
         fs = FileSystemStorage(location='media/secure/')
         saved_name = fs.save(new_filename, uploaded_file)
@@ -54,21 +62,21 @@ def patched_upload(request):
         
         context['status'] = f"Saved securely as: {saved_name}"
 
-        # FIX C (XXE): Parse XML safely
+        # FIX C (XXE): Parse XML safely (disable entity resolution)
         if ext == '.xml':
             try:
-                # DANGER REMOVED: resolve_entities=False blocks external file access
+                # resolve_entities=False and no_network=True blocks XXE
                 parser = etree.XMLParser(resolve_entities=False, no_network=True)
                 tree = etree.parse(file_path, parser=parser)
-                context['xml_content'] = "XML Parsed Safely (Entities ignored)."
+                context['xml_content'] = "XML Parsed Safely (External Entities ignored)."
             except Exception as e:
                 context['xml_error'] = str(e)
 
     return render(request, 'patched/upload.html', context)
 
-# 4. SECURE REPORT (Fixes IDOR & Temp Files)
+# 4. SECURE REPORT (Fixes IDOR & Unsafe Temp Files)
 def patched_report(request):
-    # Fix A (IDOR): Check if the user is logged in
+    # Fix A (IDOR): Check authentication
     user_session = request.session.get('user')
     if not user_session:
         return redirect('patched_login')
@@ -76,37 +84,57 @@ def patched_report(request):
     report_id = request.GET.get('id')
     
     try:
-        # Fix A (IDOR): We would normally check if report.owner == current_user
-        # For this demo, we just ensure the ID exists and don't crash.
+        # In a real app, we would also check: if report.owner == user_session['username']
         report = DiagnosticReport.objects.get(id=report_id)
         
-        # Fix B (Temp Files): We don't save to /tmp/. We stream directly.
-        # Ideally, use a ByteStream buffer.
-        return HttpResponse(f"Secure Report for ID {report_id}\nOwner: {report.technician_name}", content_type="text/plain")
+        # Fix B (Temp Files): Return content directly via memory (Stream), no temp file on disk.
+        response_text = f"SECURE REPORT #{report.id}\nTechnician: {report.technician_name}\nContent: {report.content}"
+        return HttpResponse(response_text, content_type="text/plain")
         
     except DiagnosticReport.DoesNotExist:
         return HttpResponse("Access Denied or Report Not Found", status=403)
 
-# 5. SECURE SSRF
+# 5. SECURE SSRF (Fixes Arbitrary Remote Access)
 def patched_ssrf(request):
     context = {}
     if request.method == 'POST':
         url = request.POST.get('url', '')
         
-        # Fix: Allowlist approach. Only allow specific domains.
+        # FIX: Allowlist approach.
         allowed_domains = ['scada-update-server.com', 'example.com']
         
-        # Simple check: does the URL start with an allowed domain?
+        # Check if URL starts with permitted domains
         is_allowed = any(url.startswith(f"http://{d}") or url.startswith(f"https://{d}") for d in allowed_domains)
         
         if is_allowed:
             try:
-                # Fix: Set a strict timeout and verify SSL
+                # Set timeout to prevent DoS
                 resp = requests.get(url, timeout=2)
-                context['result'] = f"Success: {resp.status_code}"
-            except:
-                context['result'] = "Connection Failed"
+                context['result'] = f"Success: {resp.status_code} - {resp.reason}"
+            except Exception as e:
+                context['result'] = f"Connection Failed: {str(e)}"
         else:
             context['result'] = "Blocked: Domain not in allowlist."
             
     return render(request, 'patched/ssrf.html', context)
+
+# 6. SECURE DIAGNOSTICS (Fixes Deserialization)
+@csrf_protect
+def patched_deserialize(request):
+    status = "Waiting for JSON payload..."
+    output = ""
+    
+    if request.method == 'POST':
+        payload = request.POST.get('payload')
+        try:
+            # JSON is used instead of Pickle.
+            # JSON is a data-interchange format and cannot execute code.
+            data = json.loads(payload)
+            status = "Success: Object Deserialized Safely (JSON)"
+            output = f"Data: {data}"
+        except json.JSONDecodeError:
+            status = "Error: Invalid JSON format."
+        except Exception as e:
+            status = f"Error: {str(e)}"
+
+    return render(request, 'patched/deserialize.html', {'status': status, 'output': output})

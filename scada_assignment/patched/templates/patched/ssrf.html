@@ -1,48 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Node Check | SCADA</title>
+</head>
+<body style="margin: 0; font-family: sans-serif; background: #f6f7fb;">
+
+<div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 1000;">
+    <div style="font-weight: 900; color: #047857; font-size: 1.2rem;">SECURE SCADA</div>
+    <div style="display: flex; gap: 15px;">
+        <a href="{% url 'patched_dashboard' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Dashboard</a>
+        <a href="{% url 'patched_upload' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Secure Upload</a>
+        <a href="{% url 'patched_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics (JSON)</a>
+        <a href="{% url 'patched_ssrf' %}" style="text-decoration: none; color: #047857; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(16, 185, 129, 0.1); border-radius: 6px;">Node Check</a>
+        <a href="{% url 'patched_login' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Logout</a>
+    </div>
+</div>
+
 <section class="scada-diag" aria-label="Secure Remote Diagnostics">
   <div class="diag-card">
     <header class="diag-header">
       <div class="title-row">
-        <h2>Secure Remote Diagnostics</h2>
-        <span class="badge badge-secure" title="Patched diagnostics flow">Secure</span>
+        <h2>Secure Node Check</h2>
+        <span class="badge badge-secure">Secure</span>
       </div>
-      <p class="sub">Patched: Only allows connections to <strong>example.com</strong>.</p>
+      <p class="sub" style="margin-top: 5px; color: #6b7280;">Patched: Only allows connections to <strong>example.com</strong> or update server.</p>
     </header>
 
     <form method="post" class="diag-form" novalidate>
       {% csrf_token %}
-
-      {% if messages %}
-        <div class="alerts" role="status" aria-live="polite">
-          {% for message in messages %}
-            <div class="alert alert-{{ message.tags }}">{{ message }}</div>
-          {% endfor %}
-        </div>
-      {% endif %}
-
       <div class="field">
-        <label for="id_url">URL</label>
-        <input
-          id="id_url"
-          type="text"
-          name="url"
-          placeholder="https://example.com"
-          autocomplete="off"
-          inputmode="url"
-          spellcheck="false"
-          required
-        />
-        <p class="help">Only <span class="mono">example.com</span> is allowed.</p>
+        <label for="id_url">Remote Node URL</label>
+        <input id="id_url" type="text" name="url" placeholder="https://example.com" required />
+        <p class="help">Allowed: example.com, scada-update-server.com</p>
       </div>
-
-      <button type="submit" class="btn">Ping</button>
+      <button type="submit" class="btn">Ping Securely</button>
     </form>
 
     {% if result %}
-      <section class="result" aria-label="Diagnostics result">
-        <div class="result-head">
-          <h3>Result</h3>
-          <span class="pill pill-good">Restricted</span>
-        </div>
+      <section class="result">
+        <h3>Result</h3>
         <pre class="result-box"><code>{{ result }}</code></pre>
       </section>
     {% endif %}
@@ -50,246 +48,16 @@
 </section>
 
 <style>
-  :root{
-    --bg:#f6f7fb;
-    --surface:#ffffff;
-    --text:#111827;
-    --muted:#6b7280;
-    --border:#e5e7eb;
-    --shadow:0 18px 45px rgba(17,24,39,.10);
-
-    --blue:#1d4ed8;
-    --blue-600:#1e40af;
-    --maroon:#8b1e3f;
-
-    --ring:rgba(29,78,216,.22);
-
-    --secure-bg:rgba(29,78,216,.10);
-    --secure-bd:rgba(29,78,216,.22);
-    --secure-tx:#1e40af;
-
-    --good-bg:rgba(29,78,216,.08);
-    --good-bd:rgba(29,78,216,.18);
-    --good-tx:#1e40af;
-
-    --err-bg:rgba(139,30,63,.10);
-    --err-bd:rgba(139,30,63,.22);
-    --err-tx:#6f1632;
-  }
-
-  *{ box-sizing:border-box; }
-
-  .scada-diag{
-    min-height: 70vh;
-    padding: 26px 16px;
-    display:grid;
-    place-items:center;
-    background:
-      radial-gradient(900px 450px at 15% 10%, rgba(29,78,216,0.10), transparent 60%),
-      radial-gradient(900px 450px at 85% 20%, rgba(139,30,63,0.08), transparent 60%),
-      linear-gradient(180deg, #ffffff, var(--bg));
-    color: var(--text);
-  }
-
-  .diag-card{
-    width: min(720px, 100%);
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    box-shadow: var(--shadow);
-    padding: 22px;
-  }
-
-  .title-row{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-bottom: 6px;
-  }
-
-  .diag-header h2{
-    margin: 0;
-    font-size: 1.45rem;
-    letter-spacing: -0.02em;
-    line-height: 1.2;
-  }
-
-  .sub{
-    margin: 0;
-    color: var(--muted);
-  }
-
-  .badge{
-    display:inline-flex;
-    align-items:center;
-    padding: 6px 10px;
-    border-radius: 999px;
-    font-size: 0.8rem;
-    font-weight: 800;
-    border: 1px solid var(--border);
-    background: #f9fafb;
-    color: var(--muted);
-    user-select:none;
-    white-space: nowrap;
-  }
-
-  .badge-secure{
-    background: var(--secure-bg);
-    border-color: var(--secure-bd);
-    color: var(--secure-tx);
-  }
-
-  .diag-form{
-    margin-top: 16px;
-    display:grid;
-    gap: 14px;
-  }
-
-  .alerts{ display:grid; gap: 10px; }
-
-  .alert{
-    padding: 12px 12px;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    background: #f9fafb;
-    color: var(--text);
-    font-weight: 650;
-  }
-
-  .alert-error{
-    background: var(--err-bg);
-    border-color: var(--err-bd);
-    color: var(--err-tx);
-  }
-
-  .field{
-    display:grid;
-    gap: 7px;
-  }
-
-  label{
-    font-size: 0.92rem;
-    font-weight: 700;
-    color: #374151;
-  }
-
-  input{
-    width: 100%;
-    padding: 12px 12px;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    background: #ffffff;
-    color: var(--text);
-    outline: none;
-    transition: box-shadow 0.15s ease, border-color 0.15s ease;
-  }
-
-  input::placeholder{ color: #9ca3af; }
-
-  input:focus{
-    border-color: rgba(29,78,216,0.55);
-    box-shadow: 0 0 0 4px var(--ring);
-  }
-
-  .help{
-    margin: 0;
-    color: var(--muted);
-    font-size: 0.9rem;
-  }
-
-  .mono{
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    color: #374151;
-  }
-
-  .btn{
-    width: 100%;
-    padding: 12px 14px;
-    border: 1px solid rgba(29,78,216,0.15);
-    border-radius: 12px;
-    background: linear-gradient(180deg, rgba(29,78,216,1), rgba(30,64,175,1));
-    color: #fff;
-    font-weight: 850;
-    cursor:pointer;
-    box-shadow: 0 10px 18px rgba(29,78,216,0.18);
-    position: relative;
-    transition: transform .05s ease, box-shadow .15s ease, filter .15s ease;
-  }
-
-  .btn::after{
-    content:"";
-    position:absolute;
-    inset:0;
-    border-radius:12px;
-    box-shadow: inset 0 -2px 0 rgba(139,30,63,0.25); /* subtle maroon accent */
-    pointer-events:none;
-  }
-
-  .btn:hover{
-    filter: brightness(1.02);
-    box-shadow: 0 14px 26px rgba(29,78,216,0.22);
-  }
-
-  .btn:active{ transform: translateY(1px); }
-
-  .result{
-    margin-top: 16px;
-    padding-top: 14px;
-    border-top: 1px solid var(--border);
-  }
-
-  .result-head{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-    margin-bottom: 8px;
-  }
-
-  .result h3{
-    margin: 0;
-    font-size: 1.05rem;
-  }
-
-  .pill{
-    display:inline-flex;
-    align-items:center;
-    padding: 6px 10px;
-    border-radius: 999px;
-    font-size: 0.84rem;
-    font-weight: 800;
-    border: 1px solid var(--border);
-    background: #f9fafb;
-    color: var(--muted);
-    white-space: nowrap;
-  }
-
-  .pill-good{
-    background: var(--good-bg);
-    border-color: var(--good-bd);
-    color: var(--good-tx);
-  }
-
-  .result-box{
-    margin: 0;
-    padding: 12px;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    background: #ffffff;
-    overflow: auto;
-    line-height: 1.45;
-    color: var(--text);
-  }
-
-  @media (max-width: 520px){
-    .diag-card{ padding: 18px; border-radius: 16px; }
-    .diag-header h2{ font-size: 1.25rem; }
-  }
-
-  @media (prefers-reduced-motion: reduce){
-    .btn, input{ transition:none; }
-  }
+  :root{ --bg:#f6f7fb; --surface:#ffffff; --text:#111827; --border:#e5e7eb; --blue:#047857; }
+  .scada-diag { padding: 40px 20px; display: grid; place-items: center; min-height: 80vh; }
+  .diag-card { width: min(600px, 100%); background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
+  .badge-secure { background: rgba(16,185,129,0.1); color: #065f46; padding: 4px 10px; border-radius: 99px; font-weight: 800; font-size: 0.75rem; border: 1px solid rgba(16,185,129,0.2); }
+  .diag-form { display: grid; gap: 15px; margin-top: 20px; }
+  .field { display: grid; gap: 5px; }
+  input { padding: 12px; border: 1px solid var(--border); border-radius: 8px; width: 100%; }
+  .help { font-size: 0.85rem; color: #6b7280; margin: 0; }
+  .btn { background: #047857; color: white; padding: 12px; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; }
+  .result-box { background: #f3f4f6; padding: 10px; border-radius: 8px; border: 1px solid #e5e7eb; overflow-x: auto; }
 </style>
+</body>
+</html>

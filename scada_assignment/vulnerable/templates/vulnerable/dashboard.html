@@ -1,3 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | SCADA System</title>
+</head>
+<body style="margin: 0; font-family: sans-serif; background: #f6f7fb;">
+
+<div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 1000;">
+    <div style="font-weight: 900; color: #1d4ed8; font-size: 1.2rem;">
+        SCADA SYSTEM
+    </div>
+    <div style="display: flex; gap: 15px;">
+        <a href="{% url 'vulnerable_dashboard' %}" style="text-decoration: none; color: #1d4ed8; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(29, 78, 216, 0.05); border-radius: 6px;">Dashboard</a>
+        <a href="{% url 'vulnerable_upload' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Upload</a>
+        <a href="{% url 'vulnerable_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics</a>
+        <a href="{% url 'monitoring' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Logs (SOC)</a>
+        <a href="{% url 'vulnerable_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check (SSRF)</a>
+        <a href="{% url 'vulnerable_login' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Exit / Login</a>
+    </div>
+</div>
 <section class="scada-dash" aria-label="SCADA Dashboard">
   <header class="dash-header">
     <div class="dash-title">
@@ -10,8 +32,7 @@
     </div>
 
     <div class="dash-actions">
-      <!-- optional action slot (kept empty on purpose) -->
-    </div>
+      </div>
   </header>
 
   <div class="table-card">
@@ -33,12 +54,12 @@
         </thead>
 
         <tbody>
-          {% for device in devices %}
-          <tr>
+          {% for device in devices %}          
+          <tr class="{% if device.is_locked_out %}row-locked{% endif %}">
             <td class="name">{{ device.name }}</td>
             <td class="mono">{{ device.ip_address }}</td>
 
-            {# status badge (purely visual; value remains unchanged) #}
+            {# status badge #}
             <td>
               <span class="status status-{{ device.status|lower|slugify }}">
                 {{ device.status }}
@@ -65,7 +86,7 @@
               No devices found.
             </td>
           </tr>
-          {% endfor %}
+          {% endfor %}          
         </tbody>
       </table>
     </div>
@@ -99,9 +120,10 @@
     --neutral-bd:#e5e7eb;
     --neutral-tx:#374151;
   }
-
+  
   *{ box-sizing:border-box; }
 
+  /* .scada-dash içindeki padding ve gradient ayarları */
   .scada-dash{
     padding: 22px 16px 30px;
     background:
@@ -109,7 +131,7 @@
       radial-gradient(900px 450px at 88% 20%, rgba(139,30,63,0.10), transparent 60%),
       linear-gradient(180deg, #fff, var(--bg));
     color: var(--text);
-    min-height: 70vh;
+    min-height: 90vh; /* Navbar gelince biraz uzattım */
   }
 
   .dash-header{
@@ -199,7 +221,7 @@
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
-    min-width: 720px; /* enables horizontal scroll on small screens */
+    min-width: 720px;
   }
 
   .scada-table thead th{
@@ -250,7 +272,6 @@
     white-space: nowrap;
   }
 
-  /* common SCADA-ish statuses (fallback stays neutral) */
   .status-online,
   .status-active,
   .status-running,
@@ -298,7 +319,6 @@
     padding: 18px 14px;
   }
 
-  /* Optional: make the action button match the UI a bit */
   .scada-table button{
     appearance: none;
     border: 1px solid rgba(29,78,216,0.25);
@@ -321,7 +341,6 @@
     transform: translateY(1px);
   }
 
-  /* Responsive */
   @media (max-width: 600px){
     .dash-title h2{ font-size: 1.3rem; }
     .meta{ border-left: none; padding-left: 0; margin-left: 0; display:block; }
@@ -332,4 +351,14 @@
     .scada-table button{ transition: none; }
     .scada-table tbody tr:hover{ background: inherit; }
   }
+
+  .row-locked {
+    background-color: #fee2e2 !important;
+  }
+  
+  .row-locked td:first-child {
+    border-left: 4px solid #b91c1c !important;
+  }
 </style>
+</body>
+</html>

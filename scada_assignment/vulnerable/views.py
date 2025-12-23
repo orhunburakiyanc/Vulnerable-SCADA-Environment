@@ -1,4 +1,4 @@
-import os
+import urllib.request
 from lxml import etree # For the XXE vulnerability
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
@@ -8,6 +8,8 @@ from django.http import HttpResponse, JsonResponse, FileResponse
 from core.models import Device, MaintenanceLog, DiagnosticReport
 from django.db.models import Q
 from reportlab.pdfgen import canvas
+from core.models import DiagnosticResult
+
 
 # SCENARIO 1: Authentication Bypass
 # Vulnerability: Accepts dictionary expansion (**request.GET)
@@ -163,3 +165,49 @@ def toggle_status(request, device_id):
         device.is_locked_out = False
     device.save()
     return redirect('vulnerable_dashboard')
+
+
+@csrf_exempt
+def vulnerable_deserialize(request):
+    # Vulnerability B: Deserialization
+    # Recieves base64 pickle data and runs it in an unsecure way    
+    
+    status = "Waiting for diagnostic payload..."
+    output = ""
+
+    if request.method == 'POST':
+        payload = request.POST.get('payload')
+        if payload:
+            try:                
+                # calling get_data() triggers the vulnerability.
+                temp_result = DiagnosticResult(serialized_data=payload)
+                
+                # VULNERABILITY
+                data = temp_result.get_data()
+                
+                status = "Object Deserialized Successfully!"
+                output = f"Decoded Data: {data}"
+            except Exception as e:
+                status = "CRITICAL ERROR: Deserialization crashed the engine."
+                output = str(e)
+
+    return render(request, 'vulnerable/deserialize.html', {'status': status, 'output': output})
+
+# Vulnerability F: SSRF (Server-Side Request Forgery)
+# Scenario: A feature to fetch "remote status logs" from other SCADA nodes.
+# Attack: User enters "http://127.0.0.1:8000/admin/" or internal IPs to scan ports.
+def vulnerable_ssrf(request):
+    status_content = "Enter a URL to check remote node status."
+    
+    if request.method == "POST":
+        target_url = request.POST.get('url')
+        if target_url:
+            try:
+                # VULNERABILITY: No whitelist, no filtering.
+                # The server performs the request on behalf of the user.
+                with urllib.request.urlopen(target_url, timeout=5) as response:
+                    status_content = f"Status: {response.status}\n\nContent:\n{response.read().decode('utf-8')[:500]}..."
+            except Exception as e:
+                status_content = f"Error fetching URL: {str(e)}"
+    
+    return render(request, 'vulnerable/ssrf.html', {'content': status_content})

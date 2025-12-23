@@ -7,4 +7,5 @@ urlpatterns = [
     path('upload/', views.patched_upload, name='patched_upload'),
     path('report/', views.patched_report, name='patched_report'),
     path('ssrf/', views.patched_ssrf, name='patched_ssrf'),
+    path('diagnostics/', views.patched_deserialize, name='patched_deserialize'), # Eklendi
 ]

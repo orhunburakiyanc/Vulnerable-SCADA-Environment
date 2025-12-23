@@ -1,3 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Diagnostic | SCADA System</title>
+</head>
+<body style="margin: 0; font-family: sans-serif; background: #f6f7fb;">
+
+<div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+    <div style="font-weight: 900; color: #1d4ed8; font-size: 1.2rem;">
+        SCADA SYSTEM
+    </div>
+    <div style="display: flex; gap: 15px;">
+        <a href="{% url 'vulnerable_dashboard' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Dashboard</a>
+        <a href="{% url 'vulnerable_upload' %}" style="text-decoration: none; color: #1d4ed8; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(29, 78, 216, 0.05); border-radius: 6px;">Upload</a>
+        <a href="{% url 'vulnerable_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics</a>
+        <a href="{% url 'monitoring' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Logs (SOC)</a>
+        <a href="{% url 'vulnerable_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check (SSRF)</a>
+        <a href="{% url 'vulnerable_login' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Exit / Login</a>
+    </div>
+</div>
 <section class="scada-upload" aria-label="Upload Diagnostic Script">
   <div class="upload-card">
     <header class="upload-header">
@@ -85,8 +107,9 @@
 
   *{ box-sizing:border-box; }
 
+  /* .scada-upload paddingini biraz azalttım çünkü üstte navbar var artık */
   .scada-upload{
-    min-height: 70vh;
+    min-height: 80vh; 
     padding: 26px 16px;
     display:grid;
     place-items:center;
@@ -314,3 +337,5 @@
     .btn, .file-btn{ transition:none; }
   }
 </style>
+</body>
+</html>

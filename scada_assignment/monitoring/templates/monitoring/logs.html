@@ -1,3 +1,18 @@
+<body style="margin: 0; font-family: sans-serif; background: #f6f7fb;">
+
+<div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 1000;">
+    <div style="font-weight: 900; color: #1d4ed8; font-size: 1.2rem;">
+        SCADA SYSTEM
+    </div>
+    <div style="display: flex; gap: 15px;">
+        <a href="{% url 'vulnerable_dashboard' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Dashboard</a>
+        <a href="{% url 'vulnerable_upload' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Upload</a>
+        <a href="{% url 'vulnerable_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics</a>
+        <a href="{% url 'monitoring' %}" style="text-decoration: none; color: #1d4ed8;; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(29, 78, 216, 0.05); border-radius: 6px;">Logs (SOC)</a>
+        <a href="{% url 'vulnerable_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check (SSRF)</a>
+        <a href="{% url 'vulnerable_login' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Exit / Login</a>
+    </div>
+</div>
 <section class="soc" aria-label="SCADA SOC">
   <header class="soc-header">
     <div>
