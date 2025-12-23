@@ -1,0 +1,304 @@
+<section class="scada-dash" aria-label="SCADA Dashboard">
+  <header class="dash-header">
+    <div class="dash-title">
+      <h2>SCADA Main Dashboard</h2>
+      <p class="sub">
+        Welcome, <strong>{{ user.username }}</strong>
+        <span class="meta">Admin: <strong>{{ user.is_admin }}</strong></span>
+      </p>
+      <p class="scenario">Scenario 2: Try to see hidden/locked devices.</p>
+    </div>
+
+    <div class="dash-actions">
+      <!-- optional action slot (kept empty on purpose) -->
+    </div>
+  </header>
+
+  <div class="table-card">
+    <div class="table-head">
+      <h3>Devices</h3>
+      <span class="pill">Total: {{ devices|length }}</span>
+    </div>
+
+    <div class="table-wrap" role="region" aria-label="Devices table" tabindex="0">
+      <table class="scada-table">
+        <thead>
+          <tr>
+            <th scope="col">Device Name</th>
+            <th scope="col">IP Address</th>
+            <th scope="col">Status</th>
+            <th scope="col">Locked Out?</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {% for device in devices %}
+          <tr>
+            <td class="name">{{ device.name }}</td>
+            <td class="mono">{{ device.ip_address }}</td>
+
+            {# status badge (purely visual; value remains unchanged) #}
+            <td>
+              <span class="status status-{{ device.status|lower|slugify }}">
+                {{ device.status }}
+              </span>
+            </td>
+
+            <td>
+              {% if device.is_locked_out %}
+                <span class="lock lock-yes">Yes</span>
+              {% else %}
+                <span class="lock lock-no">No</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="4" class="empty">
+              No devices found.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<style>
+  :root{
+    --bg:#f6f7fb;
+    --surface:#ffffff;
+    --text:#111827;
+    --muted:#6b7280;
+    --border:#e5e7eb;
+    --shadow:0 18px 45px rgba(17,24,39,.10);
+
+    --blue:#1d4ed8;
+    --blue-600:#1e40af;
+    --maroon:#8b1e3f;
+
+    --ring:rgba(29,78,216,.22);
+
+    --good-bg:rgba(29,78,216,.10);
+    --good-bd:rgba(29,78,216,.20);
+    --good-tx:#1e40af;
+
+    --warn-bg:rgba(139,30,63,.10);
+    --warn-bd:rgba(139,30,63,.20);
+    --warn-tx:#6f1632;
+
+    --neutral-bg:#f3f4f6;
+    --neutral-bd:#e5e7eb;
+    --neutral-tx:#374151;
+  }
+
+  *{ box-sizing:border-box; }
+
+  .scada-dash{
+    padding: 22px 16px 30px;
+    background:
+      radial-gradient(900px 450px at 12% 10%, rgba(29,78,216,0.10), transparent 60%),
+      radial-gradient(900px 450px at 88% 20%, rgba(139,30,63,0.10), transparent 60%),
+      linear-gradient(180deg, #fff, var(--bg));
+    color: var(--text);
+    min-height: 70vh;
+  }
+
+  .dash-header{
+    max-width: 1100px;
+    margin: 0 auto 16px;
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .dash-title h2{
+    margin:0 0 6px;
+    font-size:1.55rem;
+    letter-spacing:-0.02em;
+  }
+
+  .sub{
+    margin:0 0 6px;
+    color: var(--muted);
+  }
+
+  .meta{
+    margin-left: 10px;
+    padding-left: 10px;
+    border-left: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  .scenario{
+    margin:0;
+    color: var(--muted);
+    font-size: 0.98rem;
+  }
+
+  .table-card{
+    max-width: 1100px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .table-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #ffffff, #fbfbfd);
+  }
+
+  .table-head h3{
+    margin:0;
+    font-size: 1.05rem;
+    letter-spacing: -0.01em;
+  }
+
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(29,78,216,0.08);
+    border: 1px solid rgba(29,78,216,0.15);
+    color: var(--blue-600);
+    font-weight: 700;
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+
+  .table-wrap{
+    width: 100%;
+    overflow: auto;
+    outline: none;
+  }
+
+  .table-wrap:focus{
+    box-shadow: 0 0 0 4px var(--ring);
+  }
+
+  .scada-table{
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 720px; /* enables horizontal scroll on small screens */
+  }
+
+  .scada-table thead th{
+    text-align:left;
+    font-size: 0.86rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: #4b5563;
+    background: #f9fafb;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .scada-table tbody td{
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+
+  .scada-table tbody tr:hover{
+    background: #fbfbff;
+  }
+
+  .scada-table tbody tr:last-child td{
+    border-bottom: none;
+  }
+
+  .name{
+    font-weight: 700;
+  }
+
+  .mono{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    color: #374151;
+  }
+
+  /* Badges */
+  .status{
+    display:inline-flex;
+    align-items:center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.86rem;
+    font-weight: 750;
+    border: 1px solid var(--neutral-bd);
+    background: var(--neutral-bg);
+    color: var(--neutral-tx);
+    white-space: nowrap;
+  }
+
+  /* common SCADA-ish statuses (fallback stays neutral) */
+  .status-online,
+  .status-active,
+  .status-running,
+  .status-ok{
+    background: var(--good-bg);
+    border-color: var(--good-bd);
+    color: var(--good-tx);
+  }
+
+  .status-offline,
+  .status-down,
+  .status-error,
+  .status-fault{
+    background: var(--warn-bg);
+    border-color: var(--warn-bd);
+    color: var(--warn-tx);
+  }
+
+  .lock{
+    display:inline-flex;
+    align-items:center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.86rem;
+    font-weight: 800;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+
+  .lock-yes{
+    background: var(--warn-bg);
+    border-color: var(--warn-bd);
+    color: var(--warn-tx);
+  }
+
+  .lock-no{
+    background: rgba(29,78,216,0.08);
+    border-color: rgba(29,78,216,0.18);
+    color: var(--blue-600);
+  }
+
+  .empty{
+    text-align:center;
+    color: var(--muted);
+    padding: 18px 14px;
+  }
+
+  /* Responsive */
+  @media (max-width: 600px){
+    .dash-title h2{ font-size: 1.3rem; }
+    .meta{ border-left: none; padding-left: 0; margin-left: 0; display:block; }
+    .table-head{ padding: 12px 14px; }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .scada-table tbody tr:hover{ background: inherit; }
+  }
+</style>

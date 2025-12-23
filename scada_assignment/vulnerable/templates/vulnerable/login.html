@@ -1,0 +1,235 @@
+<section class="scada-auth" aria-label="SCADA Login">
+  <div class="scada-card" role="region" aria-labelledby="scada-title">
+    <header class="scada-header">
+      <div class="title-row">
+        <h2 id="scada-title">SCADA Login</h2>
+        <span class="badge badge-warn" title="Intentionally insecure lab scenario">Vulnerable</span>
+      </div>
+      <p>Scenario 1: Try to bypass this login.</p>
+    </header>
+
+    <form method="get" class="scada-form" novalidate>
+      <div class="field">
+        <label for="id_username">Username</label>
+        <input
+          id="id_username"
+          type="text"
+          name="username"
+          placeholder="e.g. operator"
+          autocomplete="username"
+          inputmode="text"
+          spellcheck="false"
+          autofocus
+        />
+      </div>
+
+      <div class="field">
+        <label for="id_password">Password</label>
+        <div class="input-wrap">
+          <input
+            id="id_password"
+            type="password"
+            name="password"
+            placeholder="••••••••"
+            autocomplete="current-password"
+          />
+        </div>
+      </div>
+
+      <button class="btn" type="submit">Login</button>
+
+      <p class="hint">
+        Note: This form intentionally uses <strong>GET</strong> for the lab scenario.
+      </p>
+    </form>
+  </div>
+</section>
+
+<style>
+  /*
+    Light, production-ish palette with maroon + blue accents.
+    (No frameworks; safe to drop into a Django template.)
+  */
+  :root {
+    --bg: #f6f7fb;
+    --surface: #ffffff;
+    --text: #111827;
+    --muted: #6b7280;
+
+    --border: #e5e7eb;
+    --shadow: 0 18px 45px rgba(17, 24, 39, 0.10);
+
+    /* Accents */
+    --blue: #1d4ed8;      /* primary */
+    --blue-600: #1e40af;  /* hover */
+    --maroon: #8b1e3f;    /* secondary */
+    --maroon-700: #6f1632;
+
+    /* Focus ring */
+    --ring: rgba(29, 78, 216, 0.25);
+
+    /* Badge */
+    --warn-bg: rgba(139, 30, 63, 0.10);
+    --warn-border: rgba(139, 30, 63, 0.25);
+    --warn-text: #6f1632;
+  }
+
+  * { box-sizing: border-box; }
+
+  .scada-auth {
+    min-height: 70vh;
+    display: grid;
+    place-items: center;
+    padding: 28px 16px;
+    background:
+      radial-gradient(900px 450px at 15% 10%, rgba(29, 78, 216, 0.10), transparent 60%),
+      radial-gradient(900px 450px at 85% 20%, rgba(139, 30, 63, 0.10), transparent 60%),
+      linear-gradient(180deg, #ffffff, var(--bg));
+    color: var(--text);
+  }
+
+  .scada-card {
+    width: min(520px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+  }
+
+  .scada-header {
+    margin-bottom: 14px;
+  }
+
+  .title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+
+  .scada-header h2 {
+    margin: 0;
+    font-size: 1.4rem;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  .scada-header p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.98rem;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 650;
+    border: 1px solid var(--border);
+    background: #f9fafb;
+    color: var(--muted);
+    user-select: none;
+  }
+
+  .badge-warn {
+    background: var(--warn-bg);
+    border-color: var(--warn-border);
+    color: var(--warn-text);
+  }
+
+  .scada-form {
+    display: grid;
+    gap: 14px;
+  }
+
+  .field {
+    display: grid;
+    gap: 7px;
+  }
+
+  label {
+    font-size: 0.92rem;
+    font-weight: 650;
+    color: #374151;
+  }
+
+  .input-wrap {
+    position: relative;
+  }
+
+  input {
+    width: 100%;
+    padding: 12px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: #ffffff;
+    color: var(--text);
+    outline: none;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+
+  input::placeholder {
+    color: #9ca3af;
+  }
+
+  input:focus {
+    border-color: rgba(29, 78, 216, 0.55);
+    box-shadow: 0 0 0 4px var(--ring);
+  }
+
+  /* Button: blue primary with a maroon “edge” for personality */
+  .btn {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid rgba(29, 78, 216, 0.15);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(29, 78, 216, 1), rgba(30, 64, 175, 1));
+    color: #ffffff;
+    font-weight: 750;
+    cursor: pointer;
+    transition: transform 0.05s ease, box-shadow 0.15s ease, filter 0.15s ease;
+    box-shadow: 0 10px 18px rgba(29, 78, 216, 0.18);
+    position: relative;
+  }
+
+  .btn::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    box-shadow: inset 0 -2px 0 rgba(139, 30, 63, 0.35); /* subtle maroon accent */
+    pointer-events: none;
+  }
+
+  .btn:hover {
+    filter: brightness(1.02);
+    box-shadow: 0 14px 26px rgba(29, 78, 216, 0.22);
+  }
+
+  .btn:active {
+    transform: translateY(1px);
+  }
+
+  .hint {
+    margin: 4px 0 0;
+    font-size: 0.86rem;
+    color: var(--muted);
+  }
+
+  /* Responsive tweaks */
+  @media (max-width: 420px) {
+    .scada-card { padding: 18px; border-radius: 16px; }
+    .scada-header h2 { font-size: 1.25rem; }
+  }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    .btn, input { transition: none; }
+  }
+</style>

@@ -1,0 +1,247 @@
+<section class="scada-auth" aria-label="SCADA Secure Login">
+  <div class="scada-card" role="region" aria-labelledby="scada-title">
+    <header class="scada-header">
+      <div class="title-row">
+        <h2 id="scada-title">SCADA Login</h2>
+        <span class="badge badge-secure" title="Patched login flow">Secure</span>
+      </div>
+      <p>Patched: Input injection is ignored.</p>
+    </header>
+
+    <form method="post" class="scada-form" novalidate>
+      {% csrf_token %}
+
+      {# Optional: show Django messages if your view uses them #}
+      {% if messages %}
+        <div class="alerts" role="status" aria-live="polite">
+          {% for message in messages %}
+            <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <div class="field">
+        <label for="id_username">Username</label>
+        <input
+          id="id_username"
+          type="text"
+          name="username"
+          placeholder="e.g. operator"
+          autocomplete="username"
+          inputmode="text"
+          spellcheck="false"
+          required
+        />
+      </div>
+
+      <div class="field">
+        <label for="id_password">Password</label>
+        <input
+          id="id_password"
+          type="password"
+          name="password"
+          placeholder="••••••••"
+          autocomplete="current-password"
+          required
+        />
+      </div>
+
+      <button class="btn" type="submit">Login</button>
+
+      <p class="hint">
+        This endpoint uses <strong>POST</strong> + <strong>CSRF</strong> (good).
+      </p>
+    </form>
+  </div>
+</section>
+
+<style>
+  :root {
+    --bg: #f6f7fb;
+    --surface: #ffffff;
+    --text: #111827;
+    --muted: #6b7280;
+
+    --border: #e5e7eb;
+    --shadow: 0 18px 45px rgba(17, 24, 39, 0.10);
+
+    /* Accents (blue + maroon, light palette) */
+    --blue: #1d4ed8;
+    --blue-600: #1e40af;
+    --maroon: #8b1e3f;
+
+    --ring: rgba(29, 78, 216, 0.25);
+
+    /* Secure badge */
+    --secure-bg: rgba(29, 78, 216, 0.10);
+    --secure-border: rgba(29, 78, 216, 0.22);
+    --secure-text: #1e40af;
+
+    /* Alerts */
+    --err-bg: rgba(139, 30, 63, 0.10);
+    --err-border: rgba(139, 30, 63, 0.22);
+    --err-text: #6f1632;
+  }
+
+  * { box-sizing: border-box; }
+
+  .scada-auth {
+    min-height: 70vh;
+    display: grid;
+    place-items: center;
+    padding: 28px 16px;
+    background:
+      radial-gradient(900px 450px at 15% 10%, rgba(29, 78, 216, 0.10), transparent 60%),
+      radial-gradient(900px 450px at 85% 20%, rgba(139, 30, 63, 0.08), transparent 60%),
+      linear-gradient(180deg, #ffffff, var(--bg));
+    color: var(--text);
+  }
+
+  .scada-card {
+    width: min(520px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+  }
+
+  .scada-header { margin-bottom: 14px; }
+
+  .title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+
+  .scada-header h2 {
+    margin: 0;
+    font-size: 1.4rem;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  .scada-header p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.98rem;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 750;
+    border: 1px solid var(--border);
+    background: #f9fafb;
+    color: var(--muted);
+    user-select: none;
+  }
+
+  .badge-secure {
+    background: var(--secure-bg);
+    border-color: var(--secure-border);
+    color: var(--secure-text);
+  }
+
+  .scada-form {
+    display: grid;
+    gap: 14px;
+  }
+
+  .alerts { display: grid; gap: 10px; }
+
+  .alert {
+    padding: 12px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: #f9fafb;
+    color: var(--text);
+    font-weight: 650;
+  }
+
+  .alert-error {
+    background: var(--err-bg);
+    border-color: var(--err-border);
+    color: var(--err-text);
+  }
+
+  .field {
+    display: grid;
+    gap: 7px;
+  }
+
+  label {
+    font-size: 0.92rem;
+    font-weight: 650;
+    color: #374151;
+  }
+
+  input {
+    width: 100%;
+    padding: 12px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: #ffffff;
+    color: var(--text);
+    outline: none;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+
+  input::placeholder { color: #9ca3af; }
+
+  input:focus {
+    border-color: rgba(29, 78, 216, 0.55);
+    box-shadow: 0 0 0 4px var(--ring);
+  }
+
+  .btn {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid rgba(29, 78, 216, 0.15);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(29, 78, 216, 1), rgba(30, 64, 175, 1));
+    color: #ffffff;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 10px 18px rgba(29, 78, 216, 0.18);
+    position: relative;
+    transition: transform 0.05s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  }
+
+  .btn::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    box-shadow: inset 0 -2px 0 rgba(139, 30, 63, 0.28); /* subtle maroon accent */
+    pointer-events: none;
+  }
+
+  .btn:hover {
+    filter: brightness(1.02);
+    box-shadow: 0 14px 26px rgba(29, 78, 216, 0.22);
+  }
+
+  .btn:active { transform: translateY(1px); }
+
+  .hint {
+    margin: 4px 0 0;
+    font-size: 0.86rem;
+    color: var(--muted);
+  }
+
+  @media (max-width: 420px) {
+    .scada-card { padding: 18px; border-radius: 16px; }
+    .scada-header h2 { font-size: 1.25rem; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .btn, input { transition: none; }
+  }
+</style>

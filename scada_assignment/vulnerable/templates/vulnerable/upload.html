@@ -1,0 +1,316 @@
+<section class="scada-upload" aria-label="Upload Diagnostic Script">
+  <div class="upload-card">
+    <header class="upload-header">
+      <h2>Upload Diagnostic Script</h2>
+      <p class="sub">
+        Vulnerabilities:
+        <span class="pill pill-warn">Unrestricted Upload</span>
+        <span class="pill pill-warn">File Overwrite</span>
+        <span class="pill pill-warn">XXE Injection</span>
+      </p>
+    </header>
+
+    <form method="post" enctype="multipart/form-data" class="upload-form">
+      {% csrf_token %}
+      <div class="file-row">
+        <label class="file-btn" for="id_file">
+          <span class="file-icon" aria-hidden="true">📎</span>
+          <span>Select file</span>
+        </label>
+        <input id="id_file" type="file" name="file" class="file-input" />
+        <span class="file-name" id="file_name" aria-live="polite">No file selected</span>
+      </div>
+
+      <button type="submit" class="btn">Upload</button>
+    </form>
+
+    <div class="divider" role="separator" aria-hidden="true"></div>
+
+    <section class="status" aria-label="Upload status">
+      <h3>Status</h3>
+      <p class="status-text">{{ status }}</p>
+
+      {% if xml_error %}
+        <div class="alert alert-error" role="status" aria-live="polite">
+          <strong>XML Error:</strong> {{ xml_error }}
+        </div>
+      {% endif %}
+    </section>
+
+    {% if xml_content %}
+      <section class="xml" aria-label="Parsed XML output">
+        <div class="xml-head">
+          <h3>Parsed XML Output (XXE Result)</h3>
+          <span class="badge badge-warn">Lab Output</span>
+        </div>
+        <textarea class="xml-box" rows="10" spellcheck="false" readonly>{{ xml_content }}</textarea>
+      </section>
+    {% endif %}
+  </div>
+</section>
+
+<script>
+  // Tiny UX improvement: show selected filename (no behavior changes server-side)
+  (function () {
+    const input = document.getElementById("id_file");
+    const out = document.getElementById("file_name");
+    if (!input || !out) return;
+    input.addEventListener("change", () => {
+      out.textContent = input.files && input.files[0] ? input.files[0].name : "No file selected";
+    });
+  })();
+</script>
+
+<style>
+  :root{
+    --bg:#f6f7fb;
+    --surface:#ffffff;
+    --text:#111827;
+    --muted:#6b7280;
+    --border:#e5e7eb;
+    --shadow:0 18px 45px rgba(17,24,39,.10);
+
+    --blue:#1d4ed8;
+    --blue-600:#1e40af;
+
+    --maroon:#8b1e3f;
+    --maroon-700:#6f1632;
+
+    --ring:rgba(29,78,216,.22);
+
+    --warn-bg:rgba(139,30,63,.10);
+    --warn-bd:rgba(139,30,63,.22);
+    --warn-tx:#6f1632;
+  }
+
+  *{ box-sizing:border-box; }
+
+  .scada-upload{
+    min-height: 70vh;
+    padding: 26px 16px;
+    display:grid;
+    place-items:center;
+    background:
+      radial-gradient(900px 450px at 15% 10%, rgba(29,78,216,0.10), transparent 60%),
+      radial-gradient(900px 450px at 85% 20%, rgba(139,30,63,0.10), transparent 60%),
+      linear-gradient(180deg, #ffffff, var(--bg));
+    color: var(--text);
+  }
+
+  .upload-card{
+    width: min(720px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    padding: 22px;
+  }
+
+  .upload-header h2{
+    margin: 0 0 6px;
+    font-size: 1.45rem;
+    letter-spacing: -0.02em;
+  }
+
+  .sub{
+    margin: 0;
+    color: var(--muted);
+    display:flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.84rem;
+    font-weight: 750;
+    border: 1px solid var(--border);
+    background: #f9fafb;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .pill-warn{
+    background: var(--warn-bg);
+    border-color: var(--warn-bd);
+    color: var(--warn-tx);
+  }
+
+  .upload-form{
+    margin-top: 16px;
+    display:grid;
+    gap: 14px;
+  }
+
+  .file-row{
+    display:grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    gap: 10px 12px;
+    align-items:center;
+  }
+
+  .file-btn{
+    display:inline-flex;
+    align-items:center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(29,78,216,0.18);
+    background: rgba(29,78,216,0.06);
+    color: var(--blue-600);
+    font-weight: 800;
+    cursor: pointer;
+    user-select: none;
+    transition: box-shadow .15s ease, transform .05s ease;
+  }
+
+  .file-btn:hover{
+    box-shadow: 0 10px 18px rgba(29,78,216,0.12);
+  }
+
+  .file-btn:active{
+    transform: translateY(1px);
+  }
+
+  .file-input{
+    /* hidden but accessible via label click */
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+
+  .file-name{
+    grid-column: 1 / -1;
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+
+  .btn{
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid rgba(29,78,216,0.15);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(29,78,216,1), rgba(30,64,175,1));
+    color: #fff;
+    font-weight: 800;
+    cursor:pointer;
+    box-shadow: 0 10px 18px rgba(29,78,216,0.18);
+    position: relative;
+    transition: transform .05s ease, box-shadow .15s ease, filter .15s ease;
+  }
+
+  .btn::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    border-radius:12px;
+    box-shadow: inset 0 -2px 0 rgba(139,30,63,0.35);
+    pointer-events:none;
+  }
+
+  .btn:hover{
+    filter: brightness(1.02);
+    box-shadow: 0 14px 26px rgba(29,78,216,0.22);
+  }
+
+  .btn:active{
+    transform: translateY(1px);
+  }
+
+  .divider{
+    height: 1px;
+    background: var(--border);
+    margin: 18px 0;
+  }
+
+  .status h3,
+  .xml h3{
+    margin: 0 0 8px;
+    font-size: 1.05rem;
+  }
+
+  .status-text{
+    margin: 0 0 10px;
+    color: var(--muted);
+  }
+
+  .alert{
+    padding: 12px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: #f9fafb;
+    color: var(--text);
+  }
+
+  .alert-error{
+    background: var(--warn-bg);
+    border-color: var(--warn-bd);
+    color: var(--warn-tx);
+    font-weight: 650;
+  }
+
+  .xml-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 750;
+    border: 1px solid var(--border);
+    background: #f9fafb;
+    color: var(--muted);
+    user-select:none;
+  }
+
+  .badge-warn{
+    background: var(--warn-bg);
+    border-color: var(--warn-bd);
+    color: var(--warn-tx);
+  }
+
+  .xml-box{
+    width: 100%;
+    resize: vertical;
+    min-height: 220px;
+    padding: 12px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: #ffffff;
+    color: var(--text);
+    outline: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    line-height: 1.45;
+  }
+
+  .xml-box:focus{
+    border-color: rgba(29,78,216,0.55);
+    box-shadow: 0 0 0 4px var(--ring);
+  }
+
+  @media (max-width: 520px){
+    .upload-card{ padding: 18px; border-radius: 16px; }
+    .upload-header h2{ font-size: 1.25rem; }
+    .file-row{ grid-template-columns: 1fr; }
+    .file-btn{ justify-content:center; }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .btn, .file-btn{ transition:none; }
+  }
+</style>
