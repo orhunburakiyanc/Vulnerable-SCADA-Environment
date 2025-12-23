@@ -1,4 +1,3 @@
-```markdown
 # SCADA Security Assignment - Read Me Or Fail
 
 **Authors:** Defalt, orhunburakiyanc
@@ -19,7 +18,7 @@ I built this with three distinct components because I hate monolithic messes:
 
 The structure is simple. Keep it that way.
 
-```
+
 scada_assignment/
 ├── db.sqlite3          # The database.
 ├── manage.py           # The commander.
@@ -31,7 +30,6 @@ scada_assignment/
 └── Dockerfile          # The environment blueprint.
 └── templates/          # HTML files (Now with a proper Navbar, you're welcome).
 
-```
 
 ## Setup Instructions (The Old School Way)
 
@@ -188,7 +186,3 @@ If you restart the computer:
 The database persists in `db.sqlite3` in both cases.
 
 Now go finish your report.
-
-```
-
-```
