@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     path('login/', views.vulnerable_login, name='vulnerable_login'),
+    path('logout/', views.vulnerable_logout, name='vulnerable_logout'),
     path('dashboard/', views.vulnerable_dashboard, name='vulnerable_dashboard'),
     path('upload/', views.vulnerable_upload, name='vulnerable_upload'), 
     path('report/', views.vulnerable_report, name='vulnerable_report'),

@@ -14,6 +14,10 @@ from core.models import DiagnosticResult
 # SCENARIO 1: Authentication Bypass
 # Vulnerability: Accepts dictionary expansion (**request.GET)
 # Attack: /vulnerable/login/?username=admin&password=wrong&superuser=True
+def vulnerable_logout(request):
+    request.session.flush()
+    return redirect('vulnerable_login')
+
 def vulnerable_login(request):
     if request.method == "GET":
         if 'username' in request.GET:

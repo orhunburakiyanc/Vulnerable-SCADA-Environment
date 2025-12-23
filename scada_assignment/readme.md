@@ -1,3 +1,4 @@
+```markdown
 # SCADA Security Assignment - Read Me Or Fail
 
 **Authors:** Defalt, orhunburakiyanc
@@ -26,11 +27,13 @@ scada_assignment/
 ├── vulnerable/         # The playground for hackers.
 ├── patched/            # The playground for adults.
 ├── monitoring/         # The surveillance state (SOC).
+├── docker-compose.yml  # The container orchestration.
+└── Dockerfile          # The environment blueprint.
 └── templates/          # HTML files (Now with a proper Navbar, you're welcome).
 
 ```
 
-## Setup Instructions
+## Setup Instructions (The Old School Way)
 
 If you are on a Mac (M4), you use `zsh`. If you are on Linux, you use `bash`. If you are on Windows, I can't help you.
 
@@ -53,12 +56,12 @@ pip install django faker lxml requests reportlab
 
 ```
 
-### 2. Database Initialization (CRITICAL)
+### 2. Database Initialization
 
-We need data. I updated the `populate_db` script. It doesn't just create random junk anymore; it creates specific targets for your scenarios (like a hidden **"NUCLEAR-CORE-CONTROLLER"** and an Admin report).
+We need data. I updated the `populate_db` script. It creates specific targets for your scenarios (like a hidden **"NUCLEAR-CORE-CONTROLLER"**).
 
 ```bash
-# Create the tables (including the missing DiagnosticResult table)
+# Create the tables
 python manage.py makemigrations
 python manage.py migrate
 
@@ -73,6 +76,45 @@ python manage.py populate_db
 python manage.py runserver
 
 ```
+
+---
+
+## Setup Instructions (The Docker Way - Recommended)
+
+If you don't want to deal with python versions or dependencies, use Docker. It isolates everything.
+
+### 1. Build and Run
+
+Make sure you have Docker Desktop installed and running.
+
+```bash
+# Start the container (using the new V2 command with a space)
+docker compose up --build
+
+```
+
+*Note: If `docker compose` doesn't work, try `docker-compose` (with a hyphen), but you really should update your Docker.*
+
+### 2. Initialize Database Inside Docker
+
+The container starts with an empty brain. You need to inject the schema and data. **Open a new terminal window** (keep the first one running) and execute:
+
+```bash
+# Apply migrations inside the 'web' container
+docker compose exec web python manage.py migrate
+
+# Populate the database with dummy data and hidden targets
+docker compose exec web python manage.py populate_db
+
+```
+
+### 3. Access
+
+Go to `http://localhost:8000`.
+
+*Note: I mapped the volumes (`.:/app`). This means if you change a file in your VS Code, it updates inside the container instantly. You don't need to rebuild for code changes.*
+
+---
 
 ## UI Updates
 
@@ -138,6 +180,15 @@ It uses Middleware to regex scan the raw request.
 
 ## Final Note
 
-If you restart the computer, just run `source venv/bin/activate` and `python manage.py runserver` again. The database persists in `db.sqlite3`.
+If you restart the computer:
+
+* **Local:** `source venv/bin/activate` and `python manage.py runserver`
+* **Docker:** `docker compose up`
+
+The database persists in `db.sqlite3` in both cases.
 
 Now go finish your report.
+
+```
+
+```

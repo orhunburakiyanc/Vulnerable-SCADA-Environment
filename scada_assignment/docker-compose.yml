@@ -1,0 +1,14 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # Proje klasörünü container içine bağlıyoruz.
+      # Böylece "db.sqlite3" dosyan silinmez ve kod değişikliklerin anında yansır.
+      - .:/app
+    environment:
+      # Hata ayıklama modunu aç
+      DJANGO_DEBUG: "1"
+      # Tüm hostlardan gelen isteklere izin ver
+      ALLOWED_HOSTS: "*"
