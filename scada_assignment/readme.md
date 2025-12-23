@@ -1,6 +1,6 @@
 # SCADA Security Assignment - Read Me Or Fail
 
-**Author:** Defalt, orhunburakiyanc
+**Authors:** Defalt, orhunburakiyanc
 **Date:** 2025-12-23 (Updated)
 **Kernel:** Django 5.x on Python 3.x
 
