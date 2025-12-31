@@ -1,19 +1,14 @@
-# Python Compiled Files (Gereksiz)
 __pycache__/
 *.pyc
 
-# Database (Veritabani yerelde kalmali)
 db.sqlite3
 db.sqlite3-journal
 
-# Uploaded Files (Test dosyalari gitmemeli)
 media/
 
-# Virtual Environment
 venv/
 .env
 
-# OS Generated
 .DS_Storedb.sqlite3
 dbsqlite3
 *.sqlite3
