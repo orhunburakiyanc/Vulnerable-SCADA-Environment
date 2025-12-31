@@ -8,12 +8,13 @@
 <body style="margin: 0; font-family: sans-serif; background: #f6f7fb;">
 
 <div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 1000;">
-    <div style="font-weight: 900; color: #047857; font-size: 1.2rem;">SECURE SCADA</div>
+    <div style="font-weight: 900; color: #047857; font-size: 1.2rem;">SCADA SYSTEM</div>
     <div style="display: flex; gap: 15px;">
         <a href="{% url 'patched_dashboard' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Dashboard</a>
-        <a href="{% url 'patched_upload' %}" style="text-decoration: none; color: #047857; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(16, 185, 129, 0.1); border-radius: 6px;">Secure Upload</a>
-        <a href="{% url 'patched_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics (JSON)</a>
+        <a href="{% url 'patched_upload' %}" style="text-decoration: none; color: #047857; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(16, 185, 129, 0.1); border-radius: 6px;">Upload</a>
+        <a href="{% url 'patched_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics</a>
         <a href="{% url 'patched_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check</a>
+        <a href="{% url 'monitoring_filtered' filter_path='patched' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Security Logs</a>
         <a href="{% url 'patched_login' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Logout</a>
     </div>
 </div>
@@ -22,14 +23,10 @@
   <div class="upload-card">
     <header class="upload-header">
       <div class="title-row">
-        <h2>Secure Upload Portal</h2>
-        <span class="badge badge-secure">Secure</span>
+        <h2 style="font-size: 1.5rem; color: #111827; margin-bottom: 8px;">Diagnostic File Upload</h2>
       </div>
-      <p class="sub" style="color: #6b7280; margin-top: 5px;">
-        Patched:
-        <span class="pill">Allowlist Ext</span>
-        <span class="pill">UUID Filename</span>
-        <span class="pill">No Entities (XXE)</span>
+      <p class="sub" style="color: #6b7280; font-size: 0.95rem;">
+        Secure file upload with validation - XML, TXT, and LOG files accepted
       </p>
     </header>
 
@@ -37,10 +34,10 @@
       {% csrf_token %}
       <div class="file-row">
         <label class="file-btn" for="id_file">
-          <span>Select file</span>
+          <span style="font-weight: 600;">Browse Files</span>
         </label>
         <input id="id_file" type="file" name="file" class="file-input" />
-        <span class="file-name" id="file_name">No file selected</span>
+        <span class="file-name" id="file_name" style="color: #6b7280; font-size: 0.9rem;">No file selected</span>
       </div>
       <button type="submit" class="btn">Upload Securely</button>
     </form>

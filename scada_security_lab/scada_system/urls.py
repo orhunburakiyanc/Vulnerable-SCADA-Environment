@@ -9,4 +9,5 @@ urlpatterns = [
     path('vulnerable/', include('vulnerable.urls')),
     path('patched/', include('patched.urls')),
     path('monitoring/', monitor_views.log_viewer, name='monitoring'),
+    path('monitoring/<str:filter_path>/', monitor_views.log_viewer, name='monitoring_filtered'),
 ]

@@ -43,7 +43,9 @@ def vulnerable_login(request):
                 return redirect('vulnerable_dashboard')
             else:
                 print("DEBUG: LOGIN FAILED - is_admin was not True")
-                return HttpResponse(f"Login Failed: You are not an admin. (Server saw is_admin={user_data.get('is_admin')})")
+                # FIX: Stay on the same page, don't create a new response
+                error_msg = f"Login Failed: You are not an admin. (Server saw is_admin={user_data.get('is_admin')})"
+                return render(request, 'vulnerable/login.html', {'error': error_msg})
                 
     return render(request, 'vulnerable/login.html')
 

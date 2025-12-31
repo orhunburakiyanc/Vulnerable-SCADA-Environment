@@ -16,19 +16,19 @@
         <a href="{% url 'vulnerable_upload' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Upload</a>
         <a href="{% url 'vulnerable_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics</a>
         <a href="{% url 'monitoring' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Logs (SOC)</a>
-        <a href="{% url 'vulnerable_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check (SSRF)</a>
+        <a href="{% url 'vulnerable_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check</a>
         <a href="{% url 'vulnerable_logout' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Exit / Login</a>
     </div>
 </div>
 <section class="scada-dash" aria-label="SCADA Dashboard">
   <header class="dash-header">
     <div class="dash-title">
-      <h2>SCADA Main Dashboard</h2>
+      <h2>SCADA Control Center</h2>
       <p class="sub">
-        Welcome, <strong>{{ user.username }}</strong>
-        <span class="meta">Admin: <strong>{{ user.is_admin }}</strong></span>
+        <span style="display: inline-block; background: rgba(29, 78, 216, 0.1); color: #1e40af; padding: 4px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; margin-right: 12px;">{{ user.username }}</span>
+        <span class="meta" style="color: #6b7280;">Role: <strong style="color: #111827;">{% if user.is_admin %}Administrator{% else %}Operator{% endif %}</strong></span>
       </p>
-      <p class="scenario">Scenario 2: Try to see hidden/locked devices.</p>
+      <p class="scenario" style="color: #6b7280; font-size: 0.95rem; margin-top: 8px;">Real-time monitoring of industrial control systems</p>
     </div>
 
     <div class="dash-actions">
@@ -37,8 +37,11 @@
 
   <div class="table-card">
     <div class="table-head">
-      <h3>Devices</h3>
-      <span class="pill">Total: {{ devices|length }}</span>
+      <h3 style="display: flex; align-items: center; gap: 10px;">
+        <span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);"></span>
+        Active Devices
+      </h3>
+      <span class="pill" style="background: rgba(29, 78, 216, 0.1); color: #1e40af; font-weight: 700;">{{ devices|length }} Online</span>
     </div>
 
     <div class="table-wrap" role="region" aria-label="Devices table" tabindex="0">

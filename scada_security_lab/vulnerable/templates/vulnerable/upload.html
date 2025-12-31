@@ -16,19 +16,16 @@
         <a href="{% url 'vulnerable_upload' %}" style="text-decoration: none; color: #1d4ed8; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(29, 78, 216, 0.05); border-radius: 6px;">Upload</a>
         <a href="{% url 'vulnerable_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics</a>
         <a href="{% url 'monitoring' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Logs (SOC)</a>
-        <a href="{% url 'vulnerable_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check (SSRF)</a>
+        <a href="{% url 'vulnerable_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check</a>
         <a href="{% url 'vulnerable_logout' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Exit / Login</a>
     </div>
 </div>
 <section class="scada-upload" aria-label="Upload Diagnostic Script">
   <div class="upload-card">
     <header class="upload-header">
-      <h2>Upload Diagnostic Script</h2>
-      <p class="sub">
-        Vulnerabilities:
-        <span class="pill pill-warn">Unrestricted Upload</span>
-        <span class="pill pill-warn">File Overwrite</span>
-        <span class="pill pill-warn">XXE Injection</span>
+      <h2 style="font-size: 1.5rem; color: #111827; margin-bottom: 8px;">Diagnostic File Upload</h2>
+      <p class="sub" style="color: #6b7280; font-size: 0.95rem;">
+        Upload XML, TXT, or LOG files for system analysis
       </p>
     </header>
 
@@ -36,11 +33,10 @@
       {% csrf_token %}
       <div class="file-row">
         <label class="file-btn" for="id_file">
-          <span class="file-icon" aria-hidden="true">📎</span>
-          <span>Select file</span>
+          <span style="font-weight: 600;">Browse Files</span>
         </label>
         <input id="id_file" type="file" name="file" class="file-input" />
-        <span class="file-name" id="file_name" aria-live="polite">No file selected</span>
+        <span class="file-name" id="file_name" aria-live="polite" style="color: #6b7280; font-size: 0.9rem;">No file selected</span>
       </div>
 
       <button type="submit" class="btn">Upload</button>

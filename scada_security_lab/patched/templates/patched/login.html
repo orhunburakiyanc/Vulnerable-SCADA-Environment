@@ -8,48 +8,84 @@
 <body style="margin: 0; font-family: sans-serif; background: #f6f7fb;">
 
 <div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between;">
-    <div style="font-weight: 900; color: #047857; font-size: 1.2rem;">SECURE SCADA</div>
-    <a href="/vulnerable/login/" style="text-decoration: none; color: #6b7280; font-size: 0.9rem;">Go to Vulnerable System</a>
+    <div style="font-weight: 900; color: #047857; font-size: 1.2rem;">SCADA SYSTEM</div>
+    <a href="/vulnerable/login/" style="text-decoration: none; color: #6b7280; font-size: 0.9rem;">Switch Version</a>
 </div>
 
 <section class="scada-auth">
   <div class="scada-card">
     <header class="scada-header">
-      <div class="title-row">
-        <h2 id="scada-title">SCADA Secure Login</h2>
-        <span class="badge badge-secure">Secure</span>
-      </div>
-      <p style="color: #6b7280; margin-top: 5px;">Patched: Input injection is ignored.</p>
+      <h2 id="scada-title" style="font-size: 1.75rem; color: #111827; margin-bottom: 8px;">SCADA System Login</h2>
+      <p style="color: #6b7280; font-size: 0.95rem;">Enter your credentials to access the control panel.</p>
     </header>
 
     <form method="post" class="scada-form">
       {% csrf_token %}
       <div class="field">
-        <label for="id_username">Username</label>
-        <input id="id_username" type="text" name="username" placeholder="e.g. operator" required />
+        <label for="id_username" style="font-weight: 600; color: #374151; font-size: 0.9rem;">Username</label>
+        <input id="id_username" type="text" name="username" placeholder="Enter username" required />
       </div>
       <div class="field">
-        <label for="id_password">Password</label>
-        <input id="id_password" type="password" name="password" placeholder="••••••••" required />
+        <label for="id_password" style="font-weight: 600; color: #374151; font-size: 0.9rem;">Password</label>
+        <input id="id_password" type="password" name="password" placeholder="Enter password" required />
       </div>
-      <button class="btn" type="submit">Login</button>
-      <p class="hint">This endpoint uses <strong>POST</strong> + <strong>CSRF</strong>.</p>
+      <button class="btn" type="submit">Access System</button>
     </form>
   </div>
 </section>
 
 <style>
-  :root { --bg: #f6f7fb; --text: #111827; --border: #e5e7eb; --blue: #047857; }
-  .scada-auth { min-height: 80vh; display: grid; place-items: center; padding: 20px; }
-  .scada-card { width: min(400px, 100%); background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
-  .title-row { display: flex; justify-content: space-between; align-items: center; }
-  .badge-secure { background: rgba(16,185,129,0.1); color: #065f46; padding: 4px 10px; border-radius: 99px; font-weight: 800; font-size: 0.75rem; border: 1px solid rgba(16,185,129,0.2); }
-  .scada-form { display: grid; gap: 15px; margin-top: 20px; }
-  .field { display: grid; gap: 5px; }
-  input { padding: 12px; border: 1px solid var(--border); border-radius: 8px; width: 100%; }
-  .btn { background: #047857; color: white; padding: 12px; border: none; border-radius: 8px; font-weight: 700; cursor: pointer; }
-  .btn:hover { background: #065f46; }
-  .hint { font-size: 0.85rem; color: #6b7280; text-align: center; margin-top: 10px; }
+  :root { --bg: #f6f7fb; --text: #111827; --border: #e5e7eb; --green: #047857; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .scada-auth { 
+    min-height: 80vh; 
+    display: grid; 
+    place-items: center; 
+    padding: 20px;
+    background: radial-gradient(circle at 20% 20%, rgba(16, 185, 129, 0.05), transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(16, 185, 129, 0.03), transparent 50%),
+                #f6f7fb;
+  }
+  .scada-card { 
+    width: min(420px, 100%); 
+    background: #fff; 
+    border: 1px solid var(--border); 
+    border-radius: 16px; 
+    padding: 32px; 
+    box-shadow: 0 20px 60px rgba(0,0,0,0.08);
+  }
+  .scada-header { margin-bottom: 24px; }
+  .scada-form { display: grid; gap: 18px; margin-top: 24px; }
+  .field { display: grid; gap: 8px; }
+  input { 
+    padding: 12px 14px; 
+    border: 1.5px solid #e5e7eb; 
+    border-radius: 8px; 
+    width: 92%; 
+    font-size: 0.95rem;
+    transition: all 0.2s;
+  }
+  input:focus { 
+    outline: none; 
+    border-color: #10b981; 
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+  }
+  .btn { 
+    background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+    color: white; 
+    padding: 13px; 
+    border: none; 
+    border-radius: 8px; 
+    font-weight: 600; 
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 8px;
+  }
+  .btn:hover { 
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
+  }
 </style>
 </body>
 </html>
