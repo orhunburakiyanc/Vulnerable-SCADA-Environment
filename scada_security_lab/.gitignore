@@ -14,4 +14,6 @@ venv/
 .env
 
 # OS Generated
-.DS_Store
+.DS_Storedb.sqlite3
+dbsqlite3
+*.sqlite3
