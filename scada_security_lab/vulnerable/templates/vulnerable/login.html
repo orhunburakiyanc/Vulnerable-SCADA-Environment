@@ -13,7 +13,8 @@
     </div>
     {% endif %}
 
-    <form method="get" class="scada-form" novalidate>
+    <form method="post" class="scada-form" novalidate>
+      {% csrf_token %}
       <div class="field">
         <label for="id_username">Username</label>
         <input
@@ -44,7 +45,7 @@
       <button class="btn" type="submit">Login</button>
 
       <p class="hint">
-        Note: This form intentionally uses <strong>GET</strong> for the lab scenario.
+        Tip: Try adding <code>?is_admin=true</code> to the URL for auth bypass exploit!
       </p>
     </form>
   </div>

@@ -1,5 +1,6 @@
 from django.shortcuts import render, redirect
 from django.http import HttpResponse
+from django.contrib.auth import authenticate, login
 from core.models import Device, DiagnosticReport
 from django.core.files.storage import FileSystemStorage
 from django.views.decorators.csrf import csrf_protect
@@ -11,20 +12,28 @@ import json  # Deserialization fix için gerekli
 
 # 1. SECURE LOGIN (Fixes Auth Bypass)
 def patched_login(request):
-
-    # When we press logout it sends a "GET" request to 'patched_login' link. 
+    # Logout on GET request
     if request.method == "GET":
         request.session.flush()
+        return render(request, 'patched/login.html')
     
     if request.method == "POST":
         username = request.POST.get('username')
-        # FIX: Manual session construction. No dictionary expansion (**kwargs) allowed.
-        # We explicitly set is_admin to False by default.
-        request.session['user'] = {
-            'username': username,
-            'is_admin': False 
-        }
-        return redirect('patched_dashboard')
+        password = request.POST.get('password')
+        
+        # FIX: Use Django's built-in authentication
+        user = authenticate(request, username=username, password=password)
+        if user is not None:
+            login(request, user)
+            # Manual session construction with explicit values
+            request.session['user'] = {
+                'username': user.username,
+                'is_admin': user.is_superuser  # Only set if actually superuser
+            }
+            return redirect('patched_dashboard')
+        else:
+            return render(request, 'patched/login.html', {'error': 'Invalid username or password'})
+    
     return render(request, 'patched/login.html')
 
 # 2. SECURE DASHBOARD (Fixes SQL Injection & Data Exfiltration)

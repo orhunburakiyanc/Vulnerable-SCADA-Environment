@@ -28,6 +28,10 @@ DEBUG = True
 ALLOWED_HOSTS = ['*']
 
 
+# Security Monitoring Settings
+ENABLE_AUTO_BLOCKING = False  # Change to True to enable auto-blocking of CRITICAL attacks
+
+
 # Application definition
 
 INSTALLED_APPS = [

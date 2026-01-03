@@ -1,3 +1,10 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SCADA Security Operations Center</title>
+</head>
 <body style="margin: 0; font-family: sans-serif; background: #f6f7fb;">
 
 <div style="background: #fff; border-bottom: 1px solid #e5e7eb; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 1000;">
@@ -22,293 +29,277 @@
         {% endif %}
     </div>
 </div>
-<section class="soc" aria-label="SCADA SOC">
-  <header class="soc-header">
-    <div>
-      <h2>SCADA Security Operations Center (SOC)</h2>
-      <p class="sub">Live Attack Monitoring Log</p>
+
+<!-- Statistics Dashboard -->
+<div style="max-width: 1200px; margin: 20px auto; padding: 0 16px;">
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px;">
+        <div style="background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.2);">
+            <div style="font-size: 2rem; font-weight: 900;">{{ critical_count }}</div>
+            <div style="font-size: 0.85rem; opacity: 0.9;">Critical Attacks</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);">
+            <div style="font-size: 2rem; font-weight: 900;">{{ high_count }}</div>
+            <div style="font-size: 0.85rem; opacity: 0.9;">High Severity</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);">
+            <div style="font-size: 2rem; font-weight: 900;">{{ unresolved_count }}</div>
+            <div style="font-size: 0.85rem; opacity: 0.9;">Unresolved</div>
+        </div>
+        <div style="background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%); color: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);">
+            <div style="font-size: 2rem; font-weight: 900;">{{ blocked_ips_count }}</div>
+            <div style="font-size: 0.85rem; opacity: 0.9;">Blocked IPs</div>
+        </div>
     </div>
-    <div class="soc-meta">
-      <span class="pill">Total: {{ logs|length }}</span>
-      <span class="badge badge-live" title="UI only — refresh handled by server/client">Live</span>
+
+    <!-- Filter Controls -->
+    <div style="background: white; padding: 15px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+        <form method="get" style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+            <div>
+                <label style="font-size: 0.85rem; color: #6b7280; margin-bottom: 5px; display: block;">Severity:</label>
+                <select name="severity" style="padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 0.9rem;">
+                    <option value="">All</option>
+                    <option value="CRITICAL" {% if severity_filter == 'CRITICAL' %}selected{% endif %}>Critical</option>
+                    <option value="HIGH" {% if severity_filter == 'HIGH' %}selected{% endif %}>High</option>
+                    <option value="MEDIUM" {% if severity_filter == 'MEDIUM' %}selected{% endif %}>Medium</option>
+                    <option value="LOW" {% if severity_filter == 'LOW' %}selected{% endif %}>Low</option>
+                </select>
+            </div>
+            <div>
+                <label style="font-size: 0.85rem; color: #6b7280; margin-bottom: 5px; display: block;">Action Taken:</label>
+                <select name="action" style="padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 0.9rem;">
+                    <option value="">All</option>
+                    <option value="NONE" {% if action_filter == 'NONE' %}selected{% endif %}>None</option>
+                    <option value="BLOCKED" {% if action_filter == 'BLOCKED' %}selected{% endif %}>Blocked</option>
+                    <option value="SESSION_REVOKED" {% if action_filter == 'SESSION_REVOKED' %}selected{% endif %}>Session Revoked</option>
+                    <option value="REVIEWED" {% if action_filter == 'REVIEWED' %}selected{% endif %}>Reviewed</option>
+                    <option value="AUTO_BLOCKED" {% if action_filter == 'AUTO_BLOCKED' %}selected{% endif %}>Auto-Blocked</option>
+                </select>
+            </div>
+            <div>
+                <label style="font-size: 0.85rem; color: #6b7280; margin-bottom: 5px; display: block;">Resolved:</label>
+                <select name="resolved" style="padding: 8px 12px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 0.9rem;">
+                    <option value="">All</option>
+                    <option value="no" {% if resolved_filter == 'no' %}selected{% endif %}>Unresolved</option>
+                    <option value="yes" {% if resolved_filter == 'yes' %}selected{% endif %}>Resolved</option>
+                </select>
+            </div>
+            <button type="submit" style="padding: 8px 20px; background: #1d4ed8; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem; margin-top: 22px;">Apply Filters</button>
+            <a href="{% url 'export_logs' %}" style="padding: 8px 20px; background: #047857; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 0.9rem; margin-top: 22px; display: inline-block;">Export CSV</a>
+        </form>
     </div>
-  </header>
+</div>
 
-  <div class="table-card">
-    <div class="table-head">
-      <h3>Attack Events</h3>
-      <p class="head-sub">Most recent entries appear based on your queryset ordering.</p>
+<!-- Attack Logs Table -->
+<section style="max-width: 1200px; margin: 0 auto; padding: 0 16px 40px;">
+    <div style="background: white; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); overflow: hidden;">
+        <div style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
+            <h2 style="margin: 0 0 5px; font-size: 1.3rem;">Attack Events Log</h2>
+            <p style="margin: 0; color: #6b7280; font-size: 0.9rem;">Real-time security incident monitoring with actionable intelligence</p>
+        </div>
+
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                <thead>
+                    <tr style="background: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+                        <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151;">Time</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151;">Severity</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151;">Attack Type</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151;">IP Address</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151;">Endpoint</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151;">Recommended Action</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151;">Status</th>
+                        <th style="padding: 12px; text-align: left; font-weight: 700; color: #374151;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr style="border-bottom: 1px solid #f3f4f6; {% if log.is_resolved %}opacity: 0.6;{% endif %}">
+                        <td style="padding: 12px; font-family: monospace; font-size: 0.75rem; color: #6b7280;">
+                            {{ log.timestamp|date:"Y-m-d H:i:s" }}
+                        </td>
+                        <td style="padding: 12px;">
+                            {% if log.severity == 'CRITICAL' %}
+                            <span style="background: #fef2f2; color: #991b1b; padding: 4px 10px; border-radius: 20px; font-weight: 700; font-size: 0.75rem; border: 1px solid #fecaca;">CRITICAL</span>
+                            {% elif log.severity == 'HIGH' %}
+                            <span style="background: #fef3c7; color: #92400e; padding: 4px 10px; border-radius: 20px; font-weight: 700; font-size: 0.75rem; border: 1px solid #fde68a;">HIGH</span>
+                            {% elif log.severity == 'MEDIUM' %}
+                            <span style="background: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 20px; font-weight: 700; font-size: 0.75rem; border: 1px solid #bfdbfe;">MEDIUM</span>
+                            {% else %}
+                            <span style="background: #f3f4f6; color: #4b5563; padding: 4px 10px; border-radius: 20px; font-weight: 700; font-size: 0.75rem; border: 1px solid #e5e7eb;">LOW</span>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 12px; font-weight: 600; color: #111827;">
+                            {{ log.attack_type }}
+                        </td>
+                        <td style="padding: 12px; font-family: monospace; font-size: 0.8rem; color: #1d4ed8;">
+                            {{ log.ip_address }}
+                        </td>
+                        <td style="padding: 12px; font-family: monospace; font-size: 0.75rem; color: #6b7280; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
+                            {{ log.endpoint }}
+                        </td>
+                        <td style="padding: 12px; color: #374151; max-width: 300px; line-height: 1.4;">
+                            {{ log.recommended_action|truncatewords:15 }}
+                        </td>
+                        <td style="padding: 12px;">
+                            {% if log.action_taken == 'NONE' %}
+                            <span style="background: #fef3c7; color: #92400e; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">PENDING</span>
+                            {% elif log.action_taken == 'BLOCKED' or log.action_taken == 'AUTO_BLOCKED' %}
+                            <span style="background: #fef2f2; color: #991b1b; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">BLOCKED</span>
+                            {% elif log.action_taken == 'SESSION_REVOKED' %}
+                            <span style="background: #fef3c7; color: #92400e; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">REVOKED</span>
+                            {% else %}
+                            <span style="background: #d1fae5; color: #065f46; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">{{ log.action_taken }}</span>
+                            {% endif %}
+                            {% if log.is_resolved %}
+                            <span style="background: #d1fae5; color: #065f46; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; margin-left: 4px;">✓ RESOLVED</span>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 12px;">
+                            <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+                                {% if not log.is_resolved and is_admin %}
+                                <button onclick="blockIP({{ log.id }}, '{{ log.ip_address }}')" style="padding: 5px 10px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.7rem; font-weight: 600;">Block IP</button>
+                                <button onclick="revokeSession({{ log.id }})" style="padding: 5px 10px; background: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.7rem; font-weight: 600;">Revoke</button>
+                                <button onclick="resolveLog({{ log.id }})" style="padding: 5px 10px; background: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.7rem; font-weight: 600;">Resolve</button>
+                                {% elif not log.is_resolved %}
+                                <span style="color: #9ca3af; font-size: 0.75rem; font-style: italic;">Admin access required</span>
+                                {% else %}
+                                <span style="color: #9ca3af; font-size: 0.75rem;">Resolved by {{ log.resolved_by }}</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" style="padding: 40px; text-align: center; color: #9ca3af;">
+                            No attacks detected. System is secure.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
-
-    <div class="table-wrap" role="region" aria-label="Attack log table" tabindex="0">
-      <table class="soc-table">
-        <thead>
-          <tr>
-            <th scope="col">Timestamp</th>
-            <th scope="col">Attack Type</th>
-            <th scope="col">Target URL</th>
-            <th scope="col">Attacker IP</th>
-            <th scope="col">Payload Detected</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {% for log in logs %}
-          <tr>
-            <td class="mono">{{ log.timestamp }}</td>
-
-            <td>
-              <span class="chip chip-attack">{{ log.attack_type }}</span>
-            </td>
-
-            <td class="endpoint">
-              <span class="mono">{{ log.endpoint }}</span>
-            </td>
-
-            <td class="mono">{{ log.ip_address }}</td>
-
-            <td>
-              <code class="payload">{{ log.payload }}</code>
-            </td>
-          </tr>
-          {% empty %}
-          <tr>
-            <td colspan="5" class="empty">
-              No attacks detected yet. System secure.
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
 </section>
 
-<style>
-  :root{
-    --bg:#f6f7fb;
-    --surface:#ffffff;
-    --text:#111827;
-    --muted:#6b7280;
-    --border:#e5e7eb;
-    --shadow:0 18px 45px rgba(17,24,39,.10);
+<!-- Blocked IPs Section -->
+{% if blocked_ips %}
+<section style="max-width: 1200px; margin: 0 auto 40px; padding: 0 16px;">
+    <div style="background: white; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); overflow: hidden;">
+        <div style="padding: 20px; border-bottom: 1px solid #e5e7eb; background: #fef2f2;">
+            <h3 style="margin: 0 0 5px; font-size: 1.1rem; color: #991b1b;">🚫 Currently Blocked IPs</h3>
+            <p style="margin: 0; color: #6b7280; font-size: 0.85rem;">These IPs are blocked from accessing the system</p>
+        </div>
+        <div style="padding: 20px;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                <thead>
+                    <tr style="border-bottom: 1px solid #e5e7eb;">
+                        <th style="padding: 10px; text-align: left; font-weight: 700; color: #374151;">IP Address</th>
+                        <th style="padding: 10px; text-align: left; font-weight: 700; color: #374151;">Blocked At</th>
+                        <th style="padding: 10px; text-align: left; font-weight: 700; color: #374151;">Reason</th>
+                        <th style="padding: 10px; text-align: left; font-weight: 700; color: #374151;">Blocked By</th>
+                        <th style="padding: 10px; text-align: left; font-weight: 700; color: #374151;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for blocked in blocked_ips %}
+                    <tr style="border-bottom: 1px solid #f3f4f6;">
+                        <td style="padding: 10px; font-family: monospace; color: #1d4ed8; font-weight: 600;">{{ blocked.ip_address }}</td>
+                        <td style="padding: 10px; font-family: monospace; font-size: 0.75rem; color: #6b7280;">{{ blocked.blocked_at|date:"Y-m-d H:i:s" }}</td>
+                        <td style="padding: 10px; color: #374151;">{{ blocked.reason }}</td>
+                        <td style="padding: 10px; color: #6b7280;">{{ blocked.blocked_by }}</td>
+                        <td style="padding: 10px;">
+                            <button onclick="unblockIP({{ blocked.id }}, '{{ blocked.ip_address }}')" style="padding: 5px 12px; background: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75rem; font-weight: 600;">Unblock</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endif %}
 
-    --blue:#1d4ed8;
-    --blue-600:#1e40af;
-    --maroon:#8b1e3f;
-    --maroon-700:#6f1632;
+<script>
+function blockIP(logId, ip) {
+    if (!confirm(`Block IP ${ip}? This will prevent all future requests from this address.`)) return;
+    
+    fetch(`/monitoring/action/block/${logId}/`, {method: 'GET'})
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            alert(data.message);
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error blocking IP: ' + error.message);
+        });
+}
 
-    --ring:rgba(29,78,216,.22);
+function unblockIP(blockedId, ip) {
+    if (!confirm(`Unblock IP ${ip}? This will allow requests from this address again.`)) return;
+    
+    fetch(`/monitoring/action/unblock/${blockedId}/`, {method: 'GET'})
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            alert(data.message);
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error unblocking IP: ' + error.message);
+        });
+}
 
-    --attack-bg:rgba(139,30,63,.10);
-    --attack-bd:rgba(139,30,63,.22);
-    --attack-tx:#6f1632;
+function revokeSession(logId) {
+    if (!confirm('Revoke session for this user? They will need to re-authenticate.')) return;
+    
+    fetch(`/monitoring/action/revoke/${logId}/`, {method: 'GET'})
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            alert(data.message);
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error revoking session: ' + error.message);
+        });
+}
 
-    --code-bg:#f9fafb;
-  }
+function resolveLog(logId) {
+    const notes = prompt('Enter admin notes (optional):');
+    
+    fetch(`/monitoring/action/resolve/${logId}/?notes=${encodeURIComponent(notes || '')}`, {method: 'GET'})
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            alert(data.message);
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error resolving log: ' + error.message);
+        });
+}
+</script>
 
-  *{ box-sizing:border-box; }
-
-  .soc{
-    padding: 22px 16px 30px;
-    min-height: 70vh;
-    background:
-      radial-gradient(900px 450px at 12% 10%, rgba(29,78,216,0.10), transparent 60%),
-      radial-gradient(900px 450px at 88% 20%, rgba(139,30,63,0.08), transparent 60%),
-      linear-gradient(180deg, #ffffff, var(--bg));
-    color: var(--text);
-  }
-
-  .soc-header{
-    max-width: 1200px;
-    margin: 0 auto 14px;
-    display:flex;
-    align-items:flex-end;
-    justify-content:space-between;
-    gap: 14px;
-    flex-wrap: wrap;
-  }
-
-  .soc-header h2{
-    margin:0 0 6px;
-    font-size:1.55rem;
-    letter-spacing:-0.02em;
-    line-height:1.2;
-  }
-
-  .sub{
-    margin:0;
-    color: var(--muted);
-  }
-
-  .soc-meta{
-    display:flex;
-    align-items:center;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-
-  .pill{
-    display:inline-flex;
-    align-items:center;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: rgba(29,78,216,0.08);
-    border: 1px solid rgba(29,78,216,0.15);
-    color: var(--blue-600);
-    font-weight: 800;
-    font-size: 0.85rem;
-    white-space: nowrap;
-  }
-
-  .badge{
-    display:inline-flex;
-    align-items:center;
-    padding: 6px 10px;
-    border-radius: 999px;
-    font-size: 0.8rem;
-    font-weight: 850;
-    border: 1px solid var(--border);
-    background: #f9fafb;
-    color: var(--muted);
-    user-select:none;
-    white-space: nowrap;
-  }
-
-  .badge-live{
-    background: rgba(16,185,129,0.10);
-    border-color: rgba(16,185,129,0.22);
-    color: #065f46;
-  }
-
-  .table-card{
-    max-width: 1200px;
-    margin: 0 auto;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    box-shadow: var(--shadow);
-    overflow: hidden;
-  }
-
-  .table-head{
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border);
-    background: linear-gradient(180deg, #ffffff, #fbfbfd);
-    display:flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-
-  .table-head h3{
-    margin:0;
-    font-size: 1.05rem;
-    letter-spacing: -0.01em;
-  }
-
-  .head-sub{
-    margin:0;
-    color: var(--muted);
-    font-size: 0.92rem;
-  }
-
-  .table-wrap{
-    width: 100%;
-    overflow: auto;
-    outline: none;
-  }
-
-  .table-wrap:focus{
-    box-shadow: 0 0 0 4px var(--ring);
-  }
-
-  .soc-table{
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    min-width: 980px; /* keeps columns readable; enables scroll on small screens */
-  }
-
-  .soc-table thead th{
-    text-align:left;
-    font-size: 0.86rem;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: #4b5563;
-    background: #f9fafb;
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .soc-table tbody td{
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--border);
-    vertical-align: top;
-  }
-
-  .soc-table tbody tr:hover{
-    background: #fbfbff;
-  }
-
-  .soc-table tbody tr:last-child td{
-    border-bottom: none;
-  }
-
-  .mono{
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    color:#374151;
-    white-space: nowrap;
-  }
-
-  .endpoint .mono{
-    white-space: normal;
-    word-break: break-word;
-  }
-
-  .chip{
-    display:inline-flex;
-    align-items:center;
-    padding: 6px 10px;
-    border-radius: 999px;
-    font-weight: 900;
-    border: 1px solid var(--border);
-    background: #f9fafb;
-    color: var(--muted);
-    white-space: nowrap;
-  }
-
-  .chip-attack{
-    background: var(--attack-bg);
-    border-color: var(--attack-bd);
-    color: var(--attack-tx);
-  }
-
-  .payload{
-    display:block;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--code-bg);
-    color: var(--text);
-    overflow:auto;
-    max-width: 100%;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .empty{
-    text-align:center;
-    color: var(--muted);
-    padding: 18px 14px;
-  }
-
-  @media (max-width: 600px){
-    .soc-header h2{ font-size: 1.3rem; }
-  }
-
-  @media (prefers-reduced-motion: reduce){
-    .soc-table tbody tr:hover{ background: inherit; }
-  }
-</style>
+</body>
+</html>

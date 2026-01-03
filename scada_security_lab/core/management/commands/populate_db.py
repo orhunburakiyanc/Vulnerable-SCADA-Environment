@@ -1,5 +1,6 @@
 import random
 from django.core.management.base import BaseCommand
+from django.contrib.auth.models import User
 from faker import Faker
 from core.models import Device, MaintenanceLog, DiagnosticReport
 
@@ -14,6 +15,16 @@ class Command(BaseCommand):
         Device.objects.all().delete()
         MaintenanceLog.objects.all().delete()
         DiagnosticReport.objects.all().delete()
+        
+        # Create users for login
+        self.stdout.write("Creating users...")
+        if not User.objects.filter(username='user').exists():
+            User.objects.create_user('user', 'user@scada.com', 'user123')
+            self.stdout.write(self.style.SUCCESS('✓ Normal User: user / user123'))
+        
+        if not User.objects.filter(username='admin').exists():
+            User.objects.create_superuser('admin', 'admin@scada.com', 'admin123')
+            self.stdout.write(self.style.SUCCESS('✓ Admin User: admin / admin123'))
 
         self.stdout.write("Generating Devices...")
         
