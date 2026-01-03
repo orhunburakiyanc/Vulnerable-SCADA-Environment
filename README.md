@@ -10,9 +10,9 @@ This is a SCADA simulation environment. It's not real SCADA, obviously, because 
 
 I built this with three distinct components because I hate monolithic messes:
 
-1. **`vulnerable`**: This app is a disaster. It has every hole in the book (SQLi, IDOR, XXE, Deserialization, and now **SSRF**). It's written like a junior dev's first commit on a Friday afternoon.
-2. **`patched`**: This is how code *should* be written. Input sanitization, parameterized queries, CSRF protection, and session management. It actually works.
-3. **`monitoring`**: A middleware layer that sits between the user and the server. It watches traffic. If it sees you trying to inject SQL, it logs you. I also fixed the regex so it stops flagging normal page navigation as an attack.
+1. **`vulnerable`**: This app is a disaster. It has 9 vulnerabilities (Auth Bypass, SQLi, IDOR, XXE, Deserialization RCE, File Upload/Overwrite, Race Condition, SSRF, Security Misconfiguration). It's written like a junior dev's first commit on a Friday afternoon.
+2. **`patched`**: This is how code *should* be written. Input sanitization, parameterized queries, CSRF protection, session management, and proper authorization checks. It actually works.
+3. **`monitoring`**: A comprehensive security monitoring system. It detects 13 attack types, classifies severity (CRITICAL/HIGH/MEDIUM/LOW), tracks brute force attempts (5 failures/5min), and provides admin controls (block IP, revoke session, resolve incidents). Includes statistics dashboard and detailed logging.
 
 ## The Architecture (Don't overcomplicate it)
 
@@ -99,6 +99,22 @@ docker compose exec web python manage.py populate_db
 
 Go to `http://localhost:8000`.
 
+**Test Credentials:**
+- Regular User: `user` / `user123`
+- Admin: `admin` / `admin123`
+
+**Container Commands:**
+```bash
+# View container file system (for deserialization RCE verification)
+docker compose exec web cat /tmp/pwned.txt
+
+# Access media directory (file upload tests)
+docker compose exec web ls -la media/
+
+# Check logs
+docker compose logs -f web
+```
+
 *Note: I mapped the volumes (`.:/app`). This means if you change a file in your VS Code, it updates inside the container instantly. You don't need to rebuild for code changes.*
 
 ---
@@ -121,14 +137,31 @@ Go to these URLs (or just use the Navbar) to see bad code in action.
   * *Why:* Dynamic query building.
   * *Visual:* If successful, the hidden **"NUCLEAR-CORE-CONTROLLER"** will appear in the list with a **Red Background**.
 
-* **SSRF (New):** `/vulnerable/ssrf/`
+* **IDOR (Insecure Direct Object Reference):** `/vulnerable/report/?id=103`
+  * *Why:* No authorization check on report access. Enumerate IDs 103-143 to access all diagnostic reports including admin secrets.
+  * *Exploit:* `for i in {103..143}; do curl "http://localhost:8000/vulnerable/report/?id=$i" -o "report_$i.pdf"; done`
+
+* **File Upload/Overwrite:** `/vulnerable/upload/`
+  * *Why:* No filename sanitization, same filename overwrites previous file. Upload `diagnostic_script.txt` with malicious content.
+  * *Impact:* Backdoor installation, production script replacement, no file versioning.
+
+* **XXE (XML External Entity):** `/vulnerable/upload/`
+  * *Why:* `resolve_entities=True` in the XML parser. Upload malicious XML to read local files like `/etc/passwd`.
+  * *Example Output:* Full system user list including root, daemon, www-data accounts.
+
+* **Deserialization RCE:** `/vulnerable/deserialize/`
+  * *Why:* Accepts Base64 encoded `pickle` data without validation. RCE via `__reduce__()` method.
+  * *Exploit:* Use `python3 create_pickle_payload.py` to generate payload, verify with `docker compose exec web cat /tmp/pwned.txt`
+
+* **Race Condition:** `/vulnerable/report/`
+  * *Why:* Uses static filename `/tmp/scada_report_temp.pdf` for all reports. Concurrent requests can leak data.
+
+* **SSRF (Server-Side Request Forgery):** `/vulnerable/ssrf/`
   * *Why:* It blindly takes a URL and runs `urllib.request.urlopen()`. Try accessing `http://127.0.0.1:8000/admin/`.
 
-* **XXE:** `/vulnerable/upload/`
-  * *Why:* `resolve_entities=True` in the XML parser. Upload a malicious XML to read local files.
-
-* **Deserialization:** `/vulnerable/deserialize/`
-  * *Why:* It accepts Base64 encoded `pickle` data. RCE waiting to happen.
+* **Security Misconfiguration:** `/monitoring/` (accessible without admin check in vulnerable mode)
+  * *Why:* OWASP A05:2021 - Missing authorization on security logs page. Normal users can view attack logs.
+  * *Fix in Patched:* `/monitoring/patched/` requires admin authentication.
 
 ## How to Verify It Works (The Patched App)
 
@@ -148,9 +181,17 @@ Go here to see the fixes.
 
 ## The Monitoring System
 
-Check `/monitoring/`. It uses Middleware to regex scan the raw request.
+Check `/monitoring/` for comprehensive security operations. Features:
 
-* **Update:** I fixed the logic where it was flagging the internal pipe `|` character as an attack. Now it logs *actual* attacks (SQLi, XSS, Command Injection) without spamming the logs for normal navigation.
+* **Attack Detection:** 13 attack types (Auth Bypass, SQL Injection, XXE, File Upload, IDOR, Deserialization, SSRF, XSS, Path Traversal, Command Injection, Brute Force, Directory Scanning, Cookie Manipulation)
+* **Severity Classification:** CRITICAL (RCE/Auth Bypass), HIGH (SQLi/XXE), MEDIUM (scanning), LOW (normal activity)
+* **Brute Force Detection:** 5 failed login attempts within 5 minutes triggers CRITICAL alert
+* **Admin Actions:** Block IP, Unblock IP, Revoke Session, Resolve Incident (requires admin authentication)
+* **Statistics Dashboard:** Real-time counts for Critical Alerts, High Severity, Unresolved Incidents, Blocked IPs
+* **Filters:** By severity, resolution status, attack type
+* **Auto-blocking:** Configurable via `ENABLE_AUTO_BLOCKING` flag (disabled for demos)
+
+**Security Misconfiguration Demo:** `/monitoring/` is accessible without admin check (vulnerability), while `/monitoring/patched/` requires authentication (fixed).
 
 ## Final Note
 
