@@ -202,4 +202,6 @@ If you restart the computer:
 
 The database persists in `db.sqlite3` in both cases.
 
-Now go finish your report.
+
+<img width="1570" height="961" alt="image" src="https://github.com/user-attachments/assets/89a9f980-592c-4dfc-98ba-3108330538d4" />
+<img width="1576" height="957" alt="image" src="https://github.com/user-attachments/assets/e53e9598-43e5-4846-9d2e-1fd5c776cdaa" />
