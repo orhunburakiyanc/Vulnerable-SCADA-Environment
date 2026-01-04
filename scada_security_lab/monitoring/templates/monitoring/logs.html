@@ -224,40 +224,40 @@
 
 <script>
 function blockIP(logId, ip) {
-    if (!confirm(`Block IP ${ip}? This will prevent all future requests from this address.`)) return;
+    if (!confirm('Block IP ' + ip + '? This will prevent all future requests from this address.')) return;
     
-    fetch(`/monitoring/action/block/${logId}/`, {method: 'GET'})
-        .then(response => {
+    fetch('/monitoring/action/block/' + logId + '/', {method: 'GET'})
+        .then(function(response) {
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error('HTTP error! status: ' + response.status);
             }
             return response.json();
         })
-        .then(data => {
+        .then(function(data) {
             alert(data.message);
             location.reload();
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('Error:', error);
             alert('Error blocking IP: ' + error.message);
         });
 }
 
 function unblockIP(blockedId, ip) {
-    if (!confirm(`Unblock IP ${ip}? This will allow requests from this address again.`)) return;
+    if (!confirm('Unblock IP ' + ip + '? This will allow requests from this address again.')) return;
     
-    fetch(`/monitoring/action/unblock/${blockedId}/`, {method: 'GET'})
-        .then(response => {
+    fetch('/monitoring/action/unblock/' + blockedId + '/', {method: 'GET'})
+        .then(function(response) {
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error('HTTP error! status: ' + response.status);
             }
             return response.json();
         })
-        .then(data => {
+        .then(function(data) {
             alert(data.message);
             location.reload();
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('Error:', error);
             alert('Error unblocking IP: ' + error.message);
         });
@@ -266,18 +266,18 @@ function unblockIP(blockedId, ip) {
 function revokeSession(logId) {
     if (!confirm('Revoke session for this user? They will need to re-authenticate.')) return;
     
-    fetch(`/monitoring/action/revoke/${logId}/`, {method: 'GET'})
-        .then(response => {
+    fetch('/monitoring/action/revoke/' + logId + '/', {method: 'GET'})
+        .then(function(response) {
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error('HTTP error! status: ' + response.status);
             }
             return response.json();
         })
-        .then(data => {
+        .then(function(data) {
             alert(data.message);
             location.reload();
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('Error:', error);
             alert('Error revoking session: ' + error.message);
         });
@@ -286,23 +286,62 @@ function revokeSession(logId) {
 function resolveLog(logId) {
     const notes = prompt('Enter admin notes (optional):');
     
-    fetch(`/monitoring/action/resolve/${logId}/?notes=${encodeURIComponent(notes || '')}`, {method: 'GET'})
-        .then(response => {
+    fetch('/monitoring/action/resolve/' + logId + '/?notes=' + encodeURIComponent(notes || ''), {method: 'GET'})
+        .then(function(response) {
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error('HTTP error! status: ' + response.status);
             }
             return response.json();
         })
-        .then(data => {
+        .then(function(data) {
             alert(data.message);
             location.reload();
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('Error:', error);
             alert('Error resolving log: ' + error.message);
         });
 }
 </script>
+
+{% if filter_path == 'patched' %}
+<!-- Access Denied Modal for Non-Admin Users (Patched Version) -->
+<div id="monitoringAccessDenied" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7); z-index: 9999; justify-content: center; align-items: center;">
+  <div style="background: white; border-radius: 12px; padding: 40px; max-width: 500px; text-align: center; box-shadow: 0 10px 50px rgba(0,0,0,0.3);">
+    <div style="font-size: 4rem; margin-bottom: 20px;">🔒</div>
+    <h2 style="color: #047857; margin-bottom: 15px;">Admin-Only Access</h2>
+    <p style="color: #6b7280; font-size: 1.1rem; margin-bottom: 20px;">
+      Security monitoring logs require administrator privileges.
+    </p>
+    <p style="color: #10b981; font-weight: bold; font-size: 1rem;">
+      ✓ Server-side authorization enforced
+    </p>
+    <div style="margin-top: 30px; padding: 15px; background: #f0fdf4; border-radius: 8px; border: 1px solid #86efac;">
+      <p style="color: #065f46; margin: 0; font-size: 0.9rem;">
+        This is the secure version. Non-admin users cannot access sensitive logs.
+      </p>
+    </div>
+    <button onclick="window.location.href='/patched/login/'" 
+            style="margin-top: 20px; background: #047857; color: white; border: none; padding: 12px 30px; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer;">
+      Return to Login
+    </button>
+  </div>
+</div>
+
+<script>
+// Check if user is admin for patched version
+var userIsAdmin = {{ user_is_admin|yesno:"true,false"|default:"false" }};
+if (!userIsAdmin) {
+    var monitoringModal = document.getElementById('monitoringAccessDenied');
+    if (monitoringModal) {
+        monitoringModal.style.display = 'flex';
+        setTimeout(function() {
+            window.location.href = '/patched/login/';
+        }, 5000);
+    }
+}
+</script>
+{% endif %}
 
 </body>
 </html>

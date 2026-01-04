@@ -55,9 +55,16 @@ class SecurityMonitorMiddleware:
                 recommended_action = 'IMMEDIATE ACTION: Block IP, revoke all sessions from this IP, review authentication logs'
                 reverse_action = f'Unblock IP {ip_address} if false positive'
         
-        # Dashboard endpoint - SQL Injection via OR connector
+        # Dashboard endpoint - Privilege Escalation + SQL Injection
         elif '/dashboard/' in endpoint:
-            if re.search(r"(?i)(connector=OR|is_locked_out=True)", search_space):
+            # Check for privilege escalation first (most specific)
+            if re.search(r"(?i)(is_admin=true|is_admin=1|is_superuser=true|is_superuser=1)", search_space):
+                attack_detected = 'Privilege Escalation (CVE-2025-64459)'
+                severity = 'CRITICAL'
+                recommended_action = 'IMMEDIATE ACTION: Block IP, invalidate compromised session, review session logs'
+                reverse_action = f'Unblock IP {ip_address}, restore legitimate session if needed'
+            # Then check for SQL injection
+            elif re.search(r"(?i)(connector=OR|name__icontains=NUCLEAR)", search_space):
                 attack_detected = 'SQL Injection - Filter Bypass (CVE-2025-64459)'
                 severity = 'CRITICAL'
                 recommended_action = 'Block IP immediately, review database access logs, check for data exfiltration'

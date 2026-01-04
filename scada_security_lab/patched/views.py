@@ -10,7 +10,8 @@ import requests
 from lxml import etree
 import json  # Deserialization fix için gerekli
 
-# 1. SECURE LOGIN (Fixes Auth Bypass)
+# FIX: Authentication Bypass (CVE-2025-64459, CWE-287)
+# POST-only authentication using Django's authenticate(), admin status from database only
 def patched_login(request):
     # Logout on GET request
     if request.method == "GET":
@@ -36,20 +37,31 @@ def patched_login(request):
     
     return render(request, 'patched/login.html')
 
-# 2. SECURE DASHBOARD (Fixes SQL Injection & Data Exfiltration)
+# FIX: Privilege Escalation + SQL Injection (CVE-2025-64459, CWE-269, CWE-89)
+# Static queries only, admin status from session (not URL), no dynamic filter construction
 def patched_dashboard(request):
     if 'user' not in request.session:
         return redirect('patched_login')
     
-    # FIX: Django ORM filter() uses parameterization automatically.
-    # We deliberately ignore 'connector' or other injection attempts from URL.
-    # We only show 'Operational' devices, hiding the secret/maintenance ones.
-    devices = Device.objects.filter(status='Operational')
+    user_data = request.session['user']
+    is_admin = user_data.get('is_admin', False)
     
-    context = {'devices': devices, 'user': request.session['user']}
+    if is_admin:
+        # Admin sees operational + maintenance devices (including NUCLEAR)
+        devices = Device.objects.filter(status__in=['Operational', 'Maintenance'])
+    else:
+        # Regular users only see operational devices
+        devices = Device.objects.filter(status='Operational', is_locked_out=False)
+    
+    context = {
+        'devices': devices,
+        'user': user_data,
+        'is_admin': is_admin
+    }
     return render(request, 'patched/dashboard.html', context)
 
-# 3. SECURE UPLOAD (Fixes Overwrite, Bad Type, XXE)
+# FIX: File Overwrite + Unrestricted Upload + XXE (CWE-434, CWE-611)
+# Whitelist file types, UUID filenames, XML parser with resolve_entities=False
 @csrf_protect
 def patched_upload(request):
     context = {'status': 'Waiting for secure upload...'}
@@ -83,9 +95,10 @@ def patched_upload(request):
 
     return render(request, 'patched/upload.html', context)
 
-# 4. SECURE REPORT (Fixes IDOR & Unsafe Temp Files)
+# FIX: IDOR + Unsafe Temp Files (CWE-639, CWE-377)
+# Authentication check required, content streamed (no temp file), ownership check pending
 def patched_report(request):
-    # Fix A (IDOR): Check authentication
+    # Authentication check
     user_session = request.session.get('user')
     if not user_session:
         return redirect('patched_login')
@@ -93,23 +106,19 @@ def patched_report(request):
     report_id = request.GET.get('id')
     
     try:
-        # In a real app, we would also check: if report.owner == user_session['username']
         report = DiagnosticReport.objects.get(id=report_id)
-        
-        # Fix B (Temp Files): Return content directly via memory (Stream), no temp file on disk.
         response_text = f"SECURE REPORT #{report.id}\nTechnician: {report.technician_name}\nContent: {report.content}"
         return HttpResponse(response_text, content_type="text/plain")
         
     except DiagnosticReport.DoesNotExist:
         return HttpResponse("Access Denied or Report Not Found", status=403)
 
-# 5. SECURE SSRF (Fixes Arbitrary Remote Access)
+# FIX: SSRF (CWE-918)
+# Allowlist approach - only trusted domains permitted
 def patched_ssrf(request):
     context = {}
     if request.method == 'POST':
         url = request.POST.get('url', '')
-        
-        # FIX: Allowlist approach.
         allowed_domains = ['scada-update-server.com', 'example.com']
         
         # Check if URL starts with permitted domains
@@ -127,7 +136,8 @@ def patched_ssrf(request):
             
     return render(request, 'patched/ssrf.html', context)
 
-# 6. SECURE DIAGNOSTICS (Fixes Deserialization)
+# FIX: Insecure Deserialization (CWE-502)
+# JSON used instead of Pickle - no code execution possible
 @csrf_protect
 def patched_deserialize(request):
     status = "Waiting for JSON payload..."
@@ -136,8 +146,6 @@ def patched_deserialize(request):
     if request.method == 'POST':
         payload = request.POST.get('payload')
         try:
-            # JSON is used instead of Pickle.
-            # JSON is a data-interchange format and cannot execute code.
             data = json.loads(payload)
             status = "Success: Object Deserialized Safely (JSON)"
             output = f"Data: {data}"
@@ -149,22 +157,17 @@ def patched_deserialize(request):
     return render(request, 'patched/deserialize.html', {'status': status, 'output': output})
 
 
-# 7. SECURE MAINTENANCE INTERFACE
+# FIX: Authorization Bypass + CSRF (CWE-602, CWE-352)
+# Server-side admin check returns 403 if not admin, CSRF protection enabled
 @csrf_protect
 def patched_maintenance_interface(request):
-    """
-    Secure Maintenance Mode Interface
-    - CSRF protection enabled
-    - Admin-only access control
-    - Proper authorization checks
-    """
+    """Admin-only access with server-side authorization"""
     if 'user' not in request.session:
         return redirect('patched_login')
     
     user_data = request.session['user']
     is_admin = user_data.get('is_admin', False)
     
-    # FIX: Admin-only access for maintenance interface
     if not is_admin:
         return HttpResponse(
             "<h1>Access Denied</h1><p>Maintenance interface requires administrator privileges.</p>",
@@ -200,29 +203,23 @@ def patched_maintenance_interface(request):
     return render(request, 'patched/maintenance.html', context)
 
 
+# FIX: CSRF + Authorization (CWE-352)
+# CSRF protection, admin-only authorization, input validation
 @csrf_protect
 def patched_assign_technician(request, device_id):
-    """
-    Secure technician assignment
-    - CSRF protection enabled
-    - Admin-only authorization
-    - Input validation
-    """
+    """Admin-only technician assignment with input validation"""
     if 'user' not in request.session:
         return redirect('patched_login')
     
     user_data = request.session['user']
     is_admin = user_data.get('is_admin', False)
     
-    # FIX: Admin-only authorization check
     if not is_admin:
         return HttpResponse("Access Denied: Admin privileges required", status=403)
     
     if request.method == 'POST':
         try:
             device = Device.objects.get(id=device_id)
-            
-            # FIX: Input validation
             technician_name = request.POST.get('technician_name', '').strip()
             action = request.POST.get('action', '').strip()
             
@@ -259,9 +256,11 @@ def patched_assign_technician(request, device_id):
     return redirect('patched_maintenance_interface')
 
 
+# FIX: CSRF + Authorization (CWE-352)
+# CSRF protection, admin-only authorization
 @csrf_protect
 def patched_toggle_status(request, device_id):
-    """Toggle device status - SECURE VERSION with CSRF protection"""
+    """Admin-only device toggle with CSRF protection"""
     
     # Admin authorization check
     user = request.session.get('user', {})

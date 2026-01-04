@@ -53,6 +53,7 @@ def log_viewer(request, filter_path=None):
     
     # Get user info from session
     user = request.session.get('user', {})
+    user_is_admin = user.get('is_admin', False)
     
     context = {
         'logs': logs[:100],  # Limit to 100 for performance
@@ -67,7 +68,8 @@ def log_viewer(request, filter_path=None):
         'action_filter': action_filter,
         'resolved_filter': resolved_filter,
         'user': user,
-        'is_admin': user.get('is_admin', False),
+        'is_admin': user_is_admin,
+        'user_is_admin': user_is_admin,  # For JavaScript check
     }
     
     return render(request, 'monitoring/logs.html', context)

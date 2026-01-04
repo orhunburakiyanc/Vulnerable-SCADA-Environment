@@ -63,20 +63,18 @@
     {\Huge\bfseries Vulnerable SCADA Environment\\[0.5cm] Security Analysis Report\par}
     \vspace{1.5cm}
     
-    {\Large CS458 - Cybersecurity Practices \& Applications\\[0.3cm]
+    {\Large CS437 - Cybersecurity Practices \& Applications \\[0.3cm]
     Fall 2025-2026\par}
     \vspace{2cm}
     
     {\Large\itshape Prepared by:\\[0.5cm]
-    Orhun Burak Kıyanç\par}
-    \vspace{1.5cm}
+    Orhun Burak Kıyanç \\ Mehmet Altunören \\
+    Ege Tan\par}
+    \vspace{5cm}
     
-    {\large Date: \today\par}
+    {\Large Sabanci University \\Date: \today\par}
     \vspace{2cm}
-    
-    {\large Submitted to:\\
-    {Orçun Çetin}\\
-    Sabancı University\par}
+       
     
     \vfill
     
@@ -97,7 +95,7 @@ This report presents a comprehensive security analysis of a simulated SCADA (Sup
 
 The project implements:
 \begin{itemize}[leftmargin=*]
-    \item \textbf{10 Critical Vulnerabilities:} Authentication Bypass, SQL Injection, IDOR, XXE, Deserialization RCE, File Upload \& Overwrite, Race Condition, SSRF, Security Misconfiguration, and Maintenance Interface CSRF
+    \item \textbf{11 Critical Vulnerabilities:} Authentication Bypass, Privilege Escalation, SQL Injection, IDOR, XXE, Deserialization RCE, File Upload \& Overwrite, Race Condition, SSRF, Security Misconfiguration, and Maintenance Interface CSRF
     \item \textbf{Dual Implementations:} Each vulnerability has both vulnerable and patched versions
     \item \textbf{Patched Implementations:} Secure versions demonstrating proper mitigation techniques
     \item \textbf{Real-time Monitoring:} Middleware-based attack detection and logging system
@@ -139,7 +137,7 @@ This project aims to:
 \subsection{Project Objectives}
 
 \begin{itemize}[leftmargin=*]
-    \item Implement 10 distinct security vulnerabilities with realistic exploitation scenarios
+    \item Implement 11 distinct security vulnerabilities with realistic exploitation scenarios
     \item Develop patched versions demonstrating industry-standard security practices
     \item Create a monitoring system capable of detecting and logging attacks on both vulnerable and secure versions
     \item Populate the database with devices, maintenance logs, and diagnostic reports
@@ -297,10 +295,10 @@ The \texttt{populate\_db.py} script generates 172 total records:
 % Vulnerabilities Implementation
 \section{Vulnerabilities Implementation}
 
-\subsection{Vulnerability 1: Authentication Bypass}
+\subsection{Vulnerability 1: SQL Injection - Scenario 1 (Authentication Bypass) - CVE-2025-64459}
 
 \subsubsection{Description}
-Dictionary expansion vulnerability allowing arbitrary parameter injection through URL query strings.
+SQL Injection vulnerability (CVE-2025-64459, CWE-89) allowing dictionary expansion and arbitrary parameter injection through URL query strings to bypass authentication controls.
 
 \subsubsection{Vulnerable Code}
 
@@ -355,10 +353,65 @@ def patched_login(request):
     \item No user-supplied parameter injection
 \end{itemize}
 
-\subsection{Vulnerability 2: SQL Injection - Filter Bypass}
+\subsection{Vulnerability 2: Privilege Escalation (CWE-269)}
 
 \subsubsection{Description}
-Django ORM Q object abuse allowing OR-based filter injection. Admin users can bypass the default \texttt{is\_locked\_out=False} filter to reveal locked-out critical devices.
+URL parameter manipulation allowing users to override session-based authorization flags and escalate privileges without authentication.
+
+\subsubsection{Vulnerable Code}
+
+\begin{lstlisting}[language=Python]
+def vulnerable_dashboard(request):
+    user_data = request.session.get('user', {})
+    
+    # VULNERABILITY: URL parameters override session data
+    if 'is_admin' in request.GET:
+        is_admin_param = str(request.GET.get('is_admin', 'false')).lower()
+        user_data['is_admin'] = is_admin_param in ['true', '1']
+        request.session['user'] = user_data
+    
+    is_admin = user_data.get('is_admin', False)
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Step 1: Login as regular user
+curl "http://localhost:8000/vulnerable/login/?username=attacker" -c cookies.txt
+
+# Step 2: Escalate privileges via URL parameter
+curl "http://localhost:8000/vulnerable/dashboard/?is_admin=true" -b cookies.txt
+# Session now has is_admin=True, granting admin access
+\end{lstlisting}
+
+\subsubsection{Patch Implementation}
+
+\begin{lstlisting}[language=Python]
+def patched_dashboard(request):
+    user_data = request.session.get('user', {})
+    
+    # FIXED: Only trust server-side session data
+    is_admin = user_data.get('is_admin', False)
+    # Do NOT check request.GET for authorization flags
+    
+    if is_admin:
+        devices = Device.objects.filter(is_locked_out=False)
+    else:
+        devices = Device.objects.filter(status='Operational', is_locked_out=False)
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{itemize}[leftmargin=*]
+    \item Never trust URL parameters for authorization decisions
+    \item Server-side session management only
+    \item Explicit role checks against authenticated user database
+    \item Implement proper RBAC (Role-Based Access Control)
+\end{itemize}
+
+\subsection{Vulnerability 3: SQL Injection - Scenario 2 (Data Exfiltration) - CVE-2025-64459}
+
+\subsubsection{Description}
+Django ORM Q object abuse allowing OR-based filter injection. Admin users can bypass the default \texttt{is\_locked\_out=False} filter to reveal locked-out critical NUCLEAR devices.
 
 \subsubsection{Scenario}
 By default, admin dashboard shows only non-locked devices. The NUCLEAR-CORE-CONTROLLER is permanently locked out (\texttt{is\_locked\_out=True}) for safety. An attacker with admin access can use SQL injection to reveal these hidden critical devices.
@@ -374,13 +427,14 @@ def vulnerable_dashboard(request):
         connector = request.GET.get('connector', 'AND')
         filter_params = request.GET.copy()
         
-        # Default: Admin only sees non-locked devices
-        query = Q(is_locked_out=False)
+        # Default: Admin sees operational devices, but NUCLEAR is hidden
+        # Simulates "need-to-know" policy where critical devices are restricted
+        query = Q(is_locked_out=False) & ~Q(name__icontains='NUCLEAR')
         
-        # VULNERABILITY: Admin can inject OR filter
+        # VULNERABILITY: Admin can inject OR filter to reveal NUCLEAR
         for key, value in filter_params.items():
             if connector == 'OR':
-                query |= Q(**{key: value})  # DANGEROUS
+                query |= Q(**{key: value})  # DANGEROUS - bypasses NUCLEAR filter
             else:
                 query &= Q(**{key: value})
         
@@ -393,40 +447,41 @@ def vulnerable_dashboard(request):
 \subsubsection{Exploitation}
 
 \begin{lstlisting}[language=bash]
-# Step 1: Login as admin
-curl -X POST http://localhost:8000/vulnerable/login/ \
-  -d "username=admin&password=admin123" -c cookies.txt
+# Step 1: Login as admin (via auth bypass)
+curl "http://localhost:8000/vulnerable/login/?username=hacker&is_admin=true" -c cookies.txt
 
-# Step 2: Normal admin view (only unlocked devices)
+# Step 2: Normal admin view (NUCLEAR devices hidden)
 curl http://localhost:8000/vulnerable/dashboard/ -b cookies.txt
-# Shows: 18 operational devices (no NUCLEAR)
+# Shows: 17-18 operational devices (no NUCLEAR)
 
-# Step 3: SQL Injection - reveal locked-out devices
-curl "http://localhost:8000/vulnerable/dashboard/?connector=OR&is_locked_out=True" -b cookies.txt
-# Shows: 21 devices including NUCLEAR-CORE-CONTROLLER (locked-out)
+# Step 3: SQL Injection - reveal critical NUCLEAR devices
+curl "http://localhost:8000/vulnerable/dashboard/?connector=OR&name__icontains=NUCLEAR" -b cookies.txt
+# Shows: 18-21 devices including NUCLEAR-CORE-CONTROLLER (locked-out, red background)
 \end{lstlisting}
 
 \textbf{Attack Logic:}\\
-Original query: \texttt{WHERE is\_locked\_out=False}\\
-Injected query: \texttt{WHERE is\_locked\_out=False OR is\_locked\_out=True}\\
-Result: All devices revealed (bypasses safety lock)
+Original query: \texttt{WHERE is\_locked\_out=False AND name NOT LIKE '\%NUCLEAR\%'}\\
+Injected query: \texttt{WHERE (is\_locked\_out=False AND name NOT LIKE '\%NUCLEAR\%') OR name LIKE '\%NUCLEAR\%'}\\
+Result: Critical NUCLEAR devices revealed (bypasses security filter)
 
 \textbf{Impact:}
 \begin{itemize}[leftmargin=*]
-    \item Reveals locked-out critical infrastructure (NUCLEAR reactor)
-    \item Bypasses safety lockout mechanisms
+    \item Reveals hidden critical infrastructure (NUCLEAR reactor core controller)
+    \item Bypasses "need-to-know" access control policy
     \item Only works for admin users (regular users have hardcoded filter)
-    \item Enables reconnaissance for further attacks
+    \item Enables reconnaissance for targeted attacks on critical systems
+    \item Demonstrates vulnerability chaining: Auth Bypass $\rightarrow$ Admin Access $\rightarrow$ SQL Injection $\rightarrow$ Critical Asset Discovery
 \end{itemize}
 
-\textbf{Why Only Admin is Vulnerable:}
-This design reflects real-world scenarios where:
+\textbf{Why Only Admin Can Exploit This SQL Injection:}
+The SQL injection vulnerability exists exclusively in the admin code path. This design reflects real-world scenarios where:
 \begin{itemize}[leftmargin=*]
-    \item Admin panels contain complex filtering/search features
-    \item Developers trust admin users and add "power user" functionality
-    \item Regular users get simple, hardcoded, secure views
-    \item Security is overlooked in privileged interfaces ("admin is trusted")
-    \item Demonstrates vulnerability chaining: Auth Bypass (become admin) + SQL Injection (reveal secrets)
+    \item \textbf{Code Path Separation:} Regular users bypass the vulnerable code entirely (hardcoded filter: \texttt{status='Operational'}), while admins enter the dynamic query construction block
+    \item \textbf{Dynamic vs Static Queries:} Admin panels implement complex filtering/search features using user-supplied parameters, creating injection points
+    \item \textbf{False Sense of Security:} Developers trust admin users and skip input validation ("admin is trusted anyway")
+    \item \textbf{Vulnerability Chaining:} Combined with Privilege Escalation (Vulnerability 2), any user can first become admin via \texttt{?is\_admin=true}, then exploit this SQL injection
+    \item \textbf{Defense-in-Depth Failure:} Even privileged roles require input validation - admin status should not bypass security controls
+    \item \textbf{Real-World Pattern:} Many breaches occur when attackers compromise admin accounts and exploit "power user" features lacking proper security
 \end{itemize}
 
 \subsubsection{Patch Implementation}
@@ -452,9 +507,10 @@ def patched_dashboard(request):
     \item Explicit allowlist of accessible resources
 \end{itemize}
 
-\subsection{Vulnerability 3: IDOR - Insecure Direct Object Reference}
+\subsection{Vulnerability 4: IDOR - Insecure Direct Object Reference (Vulnerability A)}
 
 \subsubsection{Description}
+Insecure Direct Object Reference (CWE-639) - IDOR vulnerability allowing users to access diagnostic reports by guessing report IDs without ownership verification.
 Missing authorization checks allow users to access arbitrary resources by manipulating ID parameters.
 
 \subsubsection{Vulnerable Code}
@@ -506,9 +562,10 @@ def patched_report(request):
     \item Input validation and sanitization
 \end{itemize}
 
-\subsection{Vulnerability 4: Insecure Deserialization (Pickle RCE)}
+\subsection{Vulnerability 5: Insecure Deserialization (Pickle RCE) - Vulnerability B}
 
 \subsubsection{Description}
+Insecure Deserialization vulnerability (CWE-502) - Deserialization bug where corrupted pickle payloads can crash the rendering engine or achieve Remote Code Execution (RCE).
 Application accepts and deserializes untrusted pickle data, allowing arbitrary code execution.
 
 \subsubsection{Vulnerable Code}
@@ -577,9 +634,14 @@ def patched_deserialize(request):
     \item Sandboxing if deserialization is unavoidable
 \end{itemize}
 
-\subsection{Vulnerability 5: File Upload \& Overwrite}
+\subsection{Vulnerability 6: File Upload \& Overwrite (Vulnerabilities C \& E)}
 
 \subsubsection{Description}
+Two related file upload vulnerabilities:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Vulnerability C: File Overwrite (CWE-434)} - Uploaded diagnostic scripts overwrite existing files without warning
+    \item \textbf{Vulnerability E: Unrestricted Upload of Dangerous File Types (CWE-434)} - No file type validation allows uploading executables, scripts, and other dangerous files
+\end{itemize}
 No file type validation allows uploading of dangerous files and overwriting critical system files.
 
 \subsubsection{Vulnerable Code}
@@ -655,9 +717,10 @@ def patched_upload(request):
 \textbf{Key Mitigations:}
 \begin{itemize}[leftmargin=*]
     \item Whitelist approach for allowed file types
-    \item UUID-based filename generation to prevent path traversal
-    \item Content-type validation (not just extension)
-    \item Virus scanning for uploaded files
+    \item UUID-based filen7: XXE - XML External Entity Injection (Vulnerability G)}
+
+\subsubsection{Description}
+Classic XXE injection vulnerability (CWE-611) allowing attackers to steal data through XML external entity resolution.r uploaded files
 \end{itemize}
 
 \subsection{Vulnerability 6: XXE - XML External Entity Injection}
@@ -735,9 +798,10 @@ def patched_upload(request):
     \item Use secure XML parsing libraries (defusedxml)
     \item Input validation and sanitization
 \end{itemize}
+8: Race Condition in File Generation (Vulnerability D - Unsafe Temp Files)}
 
-\subsection{Vulnerability 7: Race Condition in File Generation}
-
+\subsubsection{Description}
+Race condition vulnerability (CWE-377) due to predictable temporary file paths that are reused across users.
 \subsubsection{Description}
 Static temporary filename allows concurrent requests to overwrite each other's data, causing race condition vulnerabilities.
 
@@ -801,10 +865,10 @@ def patched_report(request):
     \item Proper file locking mechanisms
     \item Cleanup temporary files after use
     \item Use secure temp file libraries (tempfile module)
-\end{itemize}
+\end{itemize}9: SSRF - Server-Side Request Forgery (Vulnerability F)}
 
-\subsection{Vulnerability 8: SSRF - Server-Side Request Forgery}
-
+\subsubsection{Description}
+Server-Side Request Forgery vulnerability (CWE-918) - Application accepts arbitrary URLs and makes server-side requests without validation, allowing remote access to internal systems
 \subsubsection{Description}
 Application accepts arbitrary URLs and makes server-side requests without validation.
 
@@ -866,7 +930,7 @@ def patched_ssrf(request):
     \item Block internal IP ranges (RFC 1918)
     \item Implement timeouts and rate limiting
 \end{itemize}
-
+10
 \subsection{Vulnerability 9: Security Misconfiguration - Unauthorized Access to Monitoring Logs (OWASP A05:2021)}
 
 \subsubsection{Description}
@@ -975,7 +1039,7 @@ def log_viewer(request, filter_path=None):
 All admin action endpoints verify \texttt{user.is\_admin} and return HTTP 403 for unauthorized attempts.
 
 \newpage
-
+1
 \subsection{Vulnerability 10: SCADA Maintenance Mode Interface - Multiple Security Flaws (OWASP A01:2021 + A05:2021 + A07:2021)}
 
 \subsubsection{Description}
@@ -1422,7 +1486,7 @@ class SecurityMonitorMiddleware:
             self.check_brute_force(request, client_ip)
         
         elif '/dashboard/' in endpoint:
-            if re.search(r"(?i)(connector=OR|is_locked_out=True)", full_path):
+            if re.search(r"(?i)(connector=OR|name__icontains=NUCLEAR)", full_path):
                 attack_detected = 'SQL Injection - Filter Bypass'
         
         # Cookie manipulation detection
@@ -1667,7 +1731,7 @@ The interface includes filtering by severity, action taken, and resolution statu
 All vulnerabilities were tested using multiple approaches:
 \begin{enumerate}[leftmargin=*]
     \item \textbf{Manual Testing:} Using curl and browser developer tools
-    \item \textbf{Automated Tool:} Burp Suite
+    \item \textbf{Automated Tools:} Burp Suite and OWASP ZAP
     \item \textbf{Custom Scripts:} Python scripts for payload generation
 \end{enumerate}
 
@@ -1706,6 +1770,48 @@ SSRF & ✓ Internal Access & ✓ Blocked & ✓ Detected \\
     \item Proxy for request interception
     \item Intruder for automated IDOR testing (ID 103-153)
     \item Repeater for manual payload testing
+    \item Scanner for active/passive vulnerability detection
+\end{itemize}
+
+\subsubsection{OWASP ZAP (Zed Attack Proxy)}
+Open-source web application security scanner used for automated testing:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Spider:} Automated crawling of vulnerable and patched endpoints
+    \item \textbf{Active Scanner:} Automated detection of:
+    \begin{itemize}
+        \item SQL Injection (CVE-2025-64459)
+        \item Authentication Bypass vulnerabilities
+        \item CSRF vulnerabilities
+        \item Server-Side Request Forgery (SSRF)
+        \item XXE (XML External Entity) injection
+        \item Information Disclosure (DEBUG mode)
+    \end{itemize}
+    \item \textbf{Fuzzer:} Input validation testing for file upload and deserialization endpoints
+    \item \textbf{HUD (Heads Up Display):} Real-time security analysis during manual testing
+\end{itemize}
+
+\textbf{ZAP Configuration for Testing:}
+\begin{lstlisting}[language=bash]
+# Quick scan of vulnerable application
+zap.sh -quickurl http://localhost:8000/vulnerable/ -quickout zap_report.html
+
+# Active scan with authentication context
+zap-cli quick-scan --self-contained --start-options "-config api.key=changeme" \
+  http://localhost:8000/vulnerable/login/
+
+# API scan
+zap-cli active-scan http://localhost:8000/vulnerable/dashboard/
+\end{lstlisting}
+
+\textbf{Detected by ZAP:}
+\begin{itemize}[leftmargin=*]
+    \item ✓ SQL Injection in dashboard filter (connector=OR parameter)
+    \item ✓ Authentication bypass via GET parameters (is\_admin=true)
+    \item ✓ CSRF tokens missing on maintenance actions
+    \item ✓ SSRF vulnerability in node check endpoint
+    \item ✓ XXE vulnerability in XML upload parser
+    \item ✓ Information Disclosure (DEBUG=True, detailed error pages)
+    \item ✓ Insecure Direct Object Reference (IDOR) in report downloads
 \end{itemize}
  
 \subsubsection{curl}
@@ -1718,6 +1824,13 @@ curl "http://localhost:8000/vulnerable/login/?username=test&is_admin=true"
 for i in {1..100}; do
   curl "http://localhost:8000/vulnerable/report/?id=$i" -o "report_$i.pdf"
 done
+
+# SQL Injection test
+curl "http://localhost:8000/vulnerable/dashboard/?connector=OR&name__icontains=NUCLEAR"
+
+# SSRF test
+curl -X POST http://localhost:8000/vulnerable/ssrf/ \
+  -d "url=http://127.0.0.1:8000/admin/"
 \end{lstlisting}
 
 \subsection{Database Validation}
@@ -1952,8 +2065,8 @@ Quick reference for all exploitation commands:
 # Authentication Bypass
 curl "http://localhost:8000/vulnerable/login/?username=hacker&is_admin=true"
 
-# SQL Injection
-curl "http://localhost:8000/vulnerable/dashboard/?connector=OR&is_locked_out=True"
+# SQL Injection - reveal critical NUCLEAR devices
+curl "http://localhost:8000/vulnerable/dashboard/?connector=OR&name__icontains=NUCLEAR"
 
 # IDOR
 curl "http://localhost:8000/vulnerable/report/?id=103" -o admin_secret.pdf

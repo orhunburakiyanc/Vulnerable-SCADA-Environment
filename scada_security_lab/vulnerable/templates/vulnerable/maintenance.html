@@ -368,7 +368,7 @@
     </table>
     {% else %}
     <div class="empty-state">
-      <p>✅ No devices currently in maintenance mode</p>
+      <p>No devices currently in maintenance mode</p>
     </div>
     {% endif %}
   </div>
@@ -401,19 +401,49 @@
     </div>
     {% endif %}
   </div>
-
-  <!-- Vulnerabilities Notice -->
-  <div style="background: #fef2f2; border: 2px solid #fecaca; border-radius: 12px; padding: 20px; margin-top: 30px;">
-    <h3 style="color: #dc2626; margin-top: 0;">Security Vulnerabilities in this Interface</h3>
-    <ul style="color: #991b1b; line-height: 1.8;">
-      <li><strong>Missing CSRF Protection:</strong> @csrf_exempt allows cross-site request forgery</li>
-      <li><strong>No Authorization Check:</strong> Any logged-in user can assign technicians (should be admin-only)</li>
-      <li><strong>SQL Injection Risk:</strong> Device filtering could be exploited with malicious input</li>
-      <li><strong>Information Disclosure:</strong> Exposes all maintenance logs without access control</li>
-      <li><strong>LOTO Bypass:</strong> No validation before allowing technician assignments to locked-out devices</li>
-    </ul>
-  </div>
 </div>
 
 </body>
 </html>
+
+<script>
+// VULNERABILITY: Authorization check done client-side instead of server-side!
+// User can bypass by disabling JavaScript or intercepting the request
+document.addEventListener('DOMContentLoaded', function() {
+    const isAdmin = {{ is_admin|yesno:"true,false" }};
+    
+    if (!isAdmin) {
+        // Create modal element
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10000; display: flex; align-items: center; justify-content: center;';
+        
+        const modalContent = document.createElement('div');
+        modalContent.style.cssText = 'background: white; padding: 40px; border-radius: 12px; max-width: 500px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.3);';
+        
+        modalContent.innerHTML = '<div style="font-size: 4rem; margin-bottom: 20px;">🚫</div>' +
+            '<h2 style="color: #dc2626; margin: 0 0 15px 0;">Access Restricted</h2>' +
+            '<p style="color: #6b7280; font-size: 1.1rem; margin: 0 0 25px 0;">' +
+            'Maintenance interface requires administrator privileges.</p>' +
+            '<p style="color: #9ca3af; font-size: 0.9rem; margin: 0 0 30px 0;">' +
+            'You will be redirected to the dashboard in <span id="countdown">3</span> seconds...</p>' +
+            '<button onclick="window.location.href=\'/vulnerable/dashboard/\'" ' +
+            'style="background: #1d4ed8; color: white; border: none; padding: 12px 30px; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer;">' +
+            'Return to Dashboard</button>';
+        
+        modal.appendChild(modalContent);
+        document.body.appendChild(modal);
+        
+        // Countdown and redirect
+        let seconds = 3;
+        const countdownEl = document.getElementById('countdown');
+        const interval = setInterval(function() {
+            seconds--;
+            if (countdownEl) countdownEl.textContent = seconds;
+            if (seconds <= 0) {
+                clearInterval(interval);
+                window.location.href = '/vulnerable/dashboard/';
+            }
+        }, 1000);
+    }
+});
+</script>

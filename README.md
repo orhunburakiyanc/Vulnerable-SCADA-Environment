@@ -10,7 +10,7 @@ This is a SCADA simulation environment. It's not real SCADA, obviously, because 
 
 I built this with three distinct components because I hate monolithic messes:
 
-1. **`vulnerable`**: This app is a disaster. It has 10 vulnerabilities (Auth Bypass, SQLi, IDOR, XXE, Deserialization RCE, File Upload/Overwrite, Race Condition, SSRF, Security Misconfiguration, Maintenance Interface CSRF). It's written like a junior dev's first commit on a Friday afternoon.
+1. **`vulnerable`**: This app is a disaster. It has 11 vulnerabilities (Auth Bypass, Privilege Escalation, SQLi, IDOR, XXE, Deserialization RCE, File Upload/Overwrite, Race Condition, SSRF, Security Misconfiguration, Maintenance Interface CSRF). It's written like a junior dev's first commit on a Friday afternoon.
 2. **`patched`**: This is how code *should* be written. Input sanitization, parameterized queries, CSRF protection, session management, and proper authorization checks. It actually works.
 3. **`monitoring`**: A comprehensive security monitoring system. It detects 13 attack types, classifies severity (CRITICAL/HIGH/MEDIUM/LOW), tracks brute force attempts (5 failures/5min), and provides admin controls (block IP, revoke session, resolve incidents). Includes statistics dashboard and detailed logging.
 
@@ -132,10 +132,16 @@ Go to these URLs (or just use the Navbar) to see bad code in action.
 
 * **Auth Bypass:** `/vulnerable/login/?username=hacker&is_admin=True`
   * *Why:* Dictionary expansion in `request.GET`. It trusts whatever you put in the URL.
+  * *Impact:* Passwordless admin access without any authentication.
 
-* **SQL Injection:** `/vulnerable/dashboard/?connector=OR&is_locked_out=True`
-  * *Why:* Dynamic query building.
-  * *Visual:* If successful, the hidden **"NUCLEAR-CORE-CONTROLLER"** will appear in the list with a **Red Background**.
+* **Privilege Escalation:** `/vulnerable/dashboard/?is_admin=true` (after normal user login)
+  * *Why:* URL parameters can overwrite session data.
+  * *Impact:* Regular users can gain admin privileges via URL manipulation.
+
+* **SQL Injection (ORM Filter Bypass):** `/vulnerable/dashboard/?connector=OR&name__icontains=NUCLEAR`
+  * *Why:* Dynamic query building with user-controlled connector logic.
+  * *Visual:* If successful, the hidden **"NUCLEAR-CORE-CONTROLLER"** will appear in the dashboard with a **Red Background** and 🔒 locked status.
+  * *Admin Only:* This vulnerability requires admin privileges (chain with Auth Bypass or Privilege Escalation).
 
 * **IDOR (Insecure Direct Object Reference):** `/vulnerable/report/?id=103`
   * *Why:* No authorization check on report access. Enumerate IDs 103-143 to access all diagnostic reports including admin secrets.
@@ -159,19 +165,21 @@ Go to these URLs (or just use the Navbar) to see bad code in action.
 * **SSRF (Server-Side Request Forgery):** `/vulnerable/ssrf/`
   * *Why:* It blindly takes a URL and runs `urllib.request.urlopen()`. Try accessing `http://127.0.0.1:8000/admin/`.
 
-* **Security Misconfiguration:** `/monitoring/` (accessible without admin check in vulnerable mode)
-  * *Why:* OWASP A05:2021 - Missing authorization on security logs page. Normal users can view attack logs.
-  * *Fix in Patched:* `/monitoring/patched/` requires admin authentication.
+* **Security Misconfiguration:** 
+  * *Why:* OWASP A05:2021 - DEBUG mode enabled, security logs accessible without authorization.
+  * *Impact 1:* Wrong credentials show Django debug page with SECRET_KEY, database paths, environment variables.
+  * *Impact 2:* `/monitoring/` page accessible to all users (no admin check), exposing attack logs and security events.
+  * *Fix in Patched:* DEBUG=False, admin-only access to monitoring dashboard.
 
 * **Maintenance Interface CSRF/Authorization:** `/vulnerable/maintenance/`
-  * *Why:* OWASP A01:2021 + A05:2021 + A07:2021 - Missing CSRF protection on device operations, no admin checks, information disclosure of maintenance logs.
-  * *Features:* Lockout/Tagout (LOTO) status tracking, technician assignment, maintenance logs viewer (last 50 entries), statistics dashboard (4 metrics).
-  * *Vulnerabilities:* 
-    - @csrf_exempt on toggle_status and assign_technician (CSRF attacks possible)
-    - No authorization check (any user can assign technicians)
-    - Information disclosure (all users see all maintenance logs)
-    - No LOTO validation (can assign to locked-out devices)
-  * *Exploit:* Create malicious HTML page that submits forms to assign unauthorized technicians or toggle device status.
+  * *Why:* OWASP A01:2021 + A05:2021 + A07:2021 - Missing server-side authorization check (only client-side redirect).
+  * *Vulnerability:* Regular users see popup and redirect, but can bypass with JavaScript disabled or Burp Suite interception.
+  * *Features:* Lockout/Tagout (LOTO) status tracking, technician assignment, maintenance logs viewer, statistics dashboard.
+  * *Additional Flaws:*
+    - @csrf_exempt on assign_technician and toggle_status (CSRF attacks possible)
+    - No admin check on assign_technician (any logged user can modify if JS bypassed)
+    - Information disclosure (maintenance data sent even to non-admin users)
+  * *Exploit:* Disable JavaScript, intercept request with Burp, or create malicious HTML form for CSRF.
   * *Fix in Patched:* `/patched/maintenance/` requires admin authentication, CSRF protection enabled, input validation, LOTO compliance checks.
 
 ## How to Verify It Works (The Patched App)
