@@ -189,7 +189,9 @@ def vulnerable_report(request):
     return FileResponse(open(temp_filename, 'rb'), as_attachment=True, filename=f"report_{report_id}.pdf")
 
 # CAPABILITY: Place device in maintenance / Release lock
+@csrf_exempt
 def toggle_status(request, device_id):
+    # VULNERABILITY: No CSRF protection - CSRF attacks possible!
     # VULNERABILITY: No permission check - any logged-in user can toggle!
     if 'user' not in request.session:
         return redirect('vulnerable_login')
@@ -211,6 +213,12 @@ def toggle_status(request, device_id):
         device.status = 'Operational'
         device.is_locked_out = False  # Unlock device when going back to operational
     device.save()
+    
+    # Check if coming from maintenance interface
+    referer = request.META.get('HTTP_REFERER', '')
+    if 'maintenance' in referer:
+        return redirect('maintenance_interface')
+    
     return redirect('vulnerable_dashboard')
 
 
@@ -258,3 +266,79 @@ def vulnerable_ssrf(request):
                 status_content = f"Error fetching URL: {str(e)}"
     
     return render(request, 'vulnerable/ssrf.html', {'content': status_content})
+
+
+# Maintenance Mode Interface
+def maintenance_interface(request):
+    """
+    SCADA Maintenance Mode Interface
+    Shows devices in maintenance, lockout status, technician assignments, and logs
+    """
+    if 'user' not in request.session:
+        return redirect('vulnerable_login')
+    
+    user_data = request.session['user']
+    is_admin = user_data.get('is_admin', False)
+    
+    # Get devices in maintenance
+    maintenance_devices = Device.objects.filter(status='Maintenance').order_by('-is_locked_out', 'name')
+    
+    # Get recent maintenance logs (last 50)
+    recent_logs = MaintenanceLog.objects.select_related('device').order_by('-timestamp')[:50]
+    
+    # Get all technicians from logs (for assignment dropdown)
+    technicians = MaintenanceLog.objects.values_list('technician_name', flat=True).distinct()
+    
+    # Statistics
+    stats = {
+        'total_maintenance': maintenance_devices.count(),
+        'locked_out': maintenance_devices.filter(is_locked_out=True).count(),
+        'total_logs': MaintenanceLog.objects.count(),
+        'active_technicians': technicians.count()
+    }
+    
+    context = {
+        'user': user_data,
+        'is_admin': is_admin,
+        'maintenance_devices': maintenance_devices,
+        'recent_logs': recent_logs,
+        'technicians': list(technicians),
+        'stats': stats
+    }
+    
+    return render(request, 'vulnerable/maintenance.html', context)
+
+
+@csrf_exempt
+def assign_technician(request, device_id):
+    """
+    Assign technician to device and create maintenance log
+    VULNERABILITY: No proper authorization check, any user can assign
+    """
+    if 'user' not in request.session:
+        return redirect('vulnerable_login')
+    
+    if request.method == 'POST':
+        device = Device.objects.get(id=device_id)
+        technician_name = request.POST.get('technician_name', 'Unknown')
+        action = request.POST.get('action', 'Assigned to maintenance')
+        
+        # VULNERABILITY: No CSRF protection due to @csrf_exempt
+        # VULNERABILITY: No admin check - any logged user can assign technicians
+        
+        # Create maintenance log
+        MaintenanceLog.objects.create(
+            device=device,
+            technician_name=technician_name,
+            action=action
+        )
+        
+        # Set device to maintenance mode if not already
+        if device.status != 'Maintenance':
+            device.status = 'Maintenance'
+            device.is_locked_out = True
+            device.save()
+        
+        return redirect('maintenance_interface')
+    
+    return redirect('maintenance_interface')

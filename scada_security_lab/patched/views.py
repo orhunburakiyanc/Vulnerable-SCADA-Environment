@@ -1,7 +1,7 @@
 from django.shortcuts import render, redirect
 from django.http import HttpResponse
 from django.contrib.auth import authenticate, login
-from core.models import Device, DiagnosticReport
+from core.models import Device, DiagnosticReport, MaintenanceLog
 from django.core.files.storage import FileSystemStorage
 from django.views.decorators.csrf import csrf_protect
 import uuid
@@ -147,3 +147,157 @@ def patched_deserialize(request):
             status = f"Error: {str(e)}"
 
     return render(request, 'patched/deserialize.html', {'status': status, 'output': output})
+
+
+# 7. SECURE MAINTENANCE INTERFACE
+@csrf_protect
+def patched_maintenance_interface(request):
+    """
+    Secure Maintenance Mode Interface
+    - CSRF protection enabled
+    - Admin-only access control
+    - Proper authorization checks
+    """
+    if 'user' not in request.session:
+        return redirect('patched_login')
+    
+    user_data = request.session['user']
+    is_admin = user_data.get('is_admin', False)
+    
+    # FIX: Admin-only access for maintenance interface
+    if not is_admin:
+        return HttpResponse(
+            "<h1>Access Denied</h1><p>Maintenance interface requires administrator privileges.</p>",
+            status=403
+        )
+    
+    # Get devices in maintenance
+    maintenance_devices = Device.objects.filter(status='Maintenance').order_by('-is_locked_out', 'name')
+    
+    # Get recent maintenance logs (last 50)
+    recent_logs = MaintenanceLog.objects.select_related('device').order_by('-timestamp')[:50]
+    
+    # Get all technicians from logs (for assignment dropdown)
+    technicians = MaintenanceLog.objects.values_list('technician_name', flat=True).distinct()
+    
+    # Statistics
+    stats = {
+        'total_maintenance': maintenance_devices.count(),
+        'locked_out': maintenance_devices.filter(is_locked_out=True).count(),
+        'total_logs': MaintenanceLog.objects.count(),
+        'active_technicians': technicians.count()
+    }
+    
+    context = {
+        'user': user_data,
+        'is_admin': is_admin,
+        'maintenance_devices': maintenance_devices,
+        'recent_logs': recent_logs,
+        'technicians': list(technicians),
+        'stats': stats
+    }
+    
+    return render(request, 'patched/maintenance.html', context)
+
+
+@csrf_protect
+def patched_assign_technician(request, device_id):
+    """
+    Secure technician assignment
+    - CSRF protection enabled
+    - Admin-only authorization
+    - Input validation
+    """
+    if 'user' not in request.session:
+        return redirect('patched_login')
+    
+    user_data = request.session['user']
+    is_admin = user_data.get('is_admin', False)
+    
+    # FIX: Admin-only authorization check
+    if not is_admin:
+        return HttpResponse("Access Denied: Admin privileges required", status=403)
+    
+    if request.method == 'POST':
+        try:
+            device = Device.objects.get(id=device_id)
+            
+            # FIX: Input validation
+            technician_name = request.POST.get('technician_name', '').strip()
+            action = request.POST.get('action', '').strip()
+            
+            if not technician_name or len(technician_name) < 2:
+                return HttpResponse("Invalid technician name", status=400)
+            
+            if not action or len(action) < 5:
+                return HttpResponse("Invalid action description", status=400)
+            
+            # Sanitize inputs (prevent SQL injection)
+            technician_name = technician_name[:100]  # Limit length
+            action = action[:255]  # Limit length
+            
+            # Create maintenance log with validated data
+            MaintenanceLog.objects.create(
+                device=device,
+                technician_name=technician_name,
+                action=action
+            )
+            
+            # Set device to maintenance mode if not already
+            if device.status != 'Maintenance':
+                device.status = 'Maintenance'
+                device.is_locked_out = True
+                device.save()
+            
+            return redirect('patched_maintenance_interface')
+            
+        except Device.DoesNotExist:
+            return HttpResponse("Device not found", status=404)
+        except Exception as e:
+            return HttpResponse(f"Error: {str(e)}", status=500)
+    
+    return redirect('patched_maintenance_interface')
+
+
+@csrf_protect
+def patched_toggle_status(request, device_id):
+    """Toggle device status - SECURE VERSION with CSRF protection"""
+    
+    # Admin authorization check
+    user = request.session.get('user', {})
+    is_admin = user.get('is_admin', False)
+    
+    if not is_admin:
+        return HttpResponse(
+            "<h1>Access Denied</h1>"
+            "<p>Only administrators can toggle device status.</p>",
+            status=403
+        )
+    
+    if request.method == 'POST':
+        try:
+            device = Device.objects.get(id=device_id)
+            
+            # Toggle device status and lock status
+            if device.status == 'Operational':
+                device.status = 'Maintenance'
+                device.is_locked_out = True
+            else:
+                device.status = 'Operational'
+                device.is_locked_out = False
+            
+            device.save()
+            
+            # Check if coming from maintenance interface
+            referer = request.META.get('HTTP_REFERER', '')
+            if 'maintenance' in referer:
+                return redirect('patched_maintenance_interface')
+            
+            return redirect('patched_dashboard')
+            
+        except Device.DoesNotExist:
+            return HttpResponse("Device not found", status=404)
+        except Exception as e:
+            return HttpResponse(f"Error: {str(e)}", status=500)
+    
+    return redirect('patched_dashboard')

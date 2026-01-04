@@ -10,7 +10,7 @@ This is a SCADA simulation environment. It's not real SCADA, obviously, because 
 
 I built this with three distinct components because I hate monolithic messes:
 
-1. **`vulnerable`**: This app is a disaster. It has 9 vulnerabilities (Auth Bypass, SQLi, IDOR, XXE, Deserialization RCE, File Upload/Overwrite, Race Condition, SSRF, Security Misconfiguration). It's written like a junior dev's first commit on a Friday afternoon.
+1. **`vulnerable`**: This app is a disaster. It has 10 vulnerabilities (Auth Bypass, SQLi, IDOR, XXE, Deserialization RCE, File Upload/Overwrite, Race Condition, SSRF, Security Misconfiguration, Maintenance Interface CSRF). It's written like a junior dev's first commit on a Friday afternoon.
 2. **`patched`**: This is how code *should* be written. Input sanitization, parameterized queries, CSRF protection, session management, and proper authorization checks. It actually works.
 3. **`monitoring`**: A comprehensive security monitoring system. It detects 13 attack types, classifies severity (CRITICAL/HIGH/MEDIUM/LOW), tracks brute force attempts (5 failures/5min), and provides admin controls (block IP, revoke session, resolve incidents). Includes statistics dashboard and detailed logging.
 
@@ -163,6 +163,17 @@ Go to these URLs (or just use the Navbar) to see bad code in action.
   * *Why:* OWASP A05:2021 - Missing authorization on security logs page. Normal users can view attack logs.
   * *Fix in Patched:* `/monitoring/patched/` requires admin authentication.
 
+* **Maintenance Interface CSRF/Authorization:** `/vulnerable/maintenance/`
+  * *Why:* OWASP A01:2021 + A05:2021 + A07:2021 - Missing CSRF protection on device operations, no admin checks, information disclosure of maintenance logs.
+  * *Features:* Lockout/Tagout (LOTO) status tracking, technician assignment, maintenance logs viewer (last 50 entries), statistics dashboard (4 metrics).
+  * *Vulnerabilities:* 
+    - @csrf_exempt on toggle_status and assign_technician (CSRF attacks possible)
+    - No authorization check (any user can assign technicians)
+    - Information disclosure (all users see all maintenance logs)
+    - No LOTO validation (can assign to locked-out devices)
+  * *Exploit:* Create malicious HTML page that submits forms to assign unauthorized technicians or toggle device status.
+  * *Fix in Patched:* `/patched/maintenance/` requires admin authentication, CSRF protection enabled, input validation, LOTO compliance checks.
+
 ## How to Verify It Works (The Patched App)
 
 Go here to see the fixes.
@@ -201,7 +212,3 @@ If you restart the computer:
 * **Docker:** `docker compose up`
 
 The database persists in `db.sqlite3` in both cases.
-
-
-<img width="1570" height="961" alt="image" src="https://github.com/user-attachments/assets/89a9f980-592c-4dfc-98ba-3108330538d4" />
-<img width="1576" height="957" alt="image" src="https://github.com/user-attachments/assets/e53e9598-43e5-4846-9d2e-1fd5c776cdaa" />

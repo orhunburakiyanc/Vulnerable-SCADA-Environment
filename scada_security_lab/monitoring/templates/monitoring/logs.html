@@ -13,7 +13,9 @@
     </div>
     <div style="display: flex; gap: 15px;">
         {% if filter_path == 'patched' %}
+
             <a href="{% url 'patched_dashboard' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Dashboard</a>
+            <a href="{% url 'patched_maintenance_interface' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Maintenance</a>
             <a href="{% url 'patched_upload' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Upload</a>
             <a href="{% url 'patched_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics</a>
             <a href="{% url 'patched_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check</a>
@@ -21,10 +23,11 @@
             <a href="{% url 'patched_login' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Logout</a>
         {% else %}
             <a href="{% url 'vulnerable_dashboard' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Dashboard</a>
+            <a href="{% url 'maintenance_interface' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Maintenance</a>
             <a href="{% url 'vulnerable_upload' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Upload</a>
             <a href="{% url 'vulnerable_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics</a>
-            <a href="{% url 'monitoring' %}" style="text-decoration: none; color: #1d4ed8; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(29, 78, 216, 0.05); border-radius: 6px;">Logs (SOC)</a>
-            <a href="{% url 'vulnerable_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check (SSRF)</a>
+            <a href="{% url 'vulnerable_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check</a>
+            <a href="{% url 'monitoring' %}" style="text-decoration: none; color: #1d4ed8; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(29, 78, 216, 0.05); border-radius: 6px;">Logs (SOC)</a>            
             <a href="{% url 'vulnerable_login' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Exit / Login</a>
         {% endif %}
     </div>
