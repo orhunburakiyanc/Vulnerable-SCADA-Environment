@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<diagnostic>
+    <system>HACKED</system>
+    <critical_config>
+        <temperature_threshold>0</temperature_threshold>
+        <pressure_limit>0</pressure_limit>
+        <emergency_shutdown>DISABLED</emergency_shutdown>
+    </critical_config>
+    <message>SYSTEM COMPROMISED - Original file overwritten!</message>
+</diagnostic>

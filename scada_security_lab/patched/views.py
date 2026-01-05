@@ -46,15 +46,25 @@ def patched_dashboard(request):
     user_data = request.session['user']
     is_admin = user_data.get('is_admin', False)
     
+    # FIX: No SQL injection - hardcoded filters only
     if is_admin:
-        # Admin sees operational + maintenance devices (including NUCLEAR)
-        devices = Device.objects.filter(status__in=['Operational', 'Maintenance'])
+        # Admin sees operational + maintenance devices (no locked out)
+        devices = Device.objects.filter(status__in=['Operational', 'Maintenance'], is_locked_out=False)
     else:
         # Regular users only see operational devices
         devices = Device.objects.filter(status='Operational', is_locked_out=False)
     
+    # FIX: Mask IP addresses for non-admin users (information disclosure protection)
+    devices_list = list(devices)
+    for device in devices_list:
+        if not is_admin:
+            # Mask last two octets: 192.168.1.100 → 192.168.x.x
+            parts = device.ip_address.split('.')
+            if len(parts) == 4:
+                device.ip_address = f"{parts[0]}.{parts[1]}.x.x"
+    
     context = {
-        'devices': devices,
+        'devices': devices_list,
         'user': user_data,
         'is_admin': is_admin
     }
@@ -96,22 +106,40 @@ def patched_upload(request):
     return render(request, 'patched/upload.html', context)
 
 # FIX: IDOR + Unsafe Temp Files (CWE-639, CWE-377)
-# Authentication check required, content streamed (no temp file), ownership check pending
+# Authentication check required + ownership verification
 def patched_report(request):
     # Authentication check
     user_session = request.session.get('user')
     if not user_session:
         return redirect('patched_login')
-        
+    
+    username = user_session.get('username')
+    is_admin = user_session.get('is_admin', False)
     report_id = request.GET.get('id')
+    
+    if not report_id:
+        return HttpResponse("Report ID required", status=400)
     
     try:
         report = DiagnosticReport.objects.get(id=report_id)
+        
+        # CRITICAL: Ownership verification
+        # - Admins can access all reports (for audit purposes)
+        # - Regular users can only access their own reports
+        if not is_admin and report.technician_name != username:
+            return HttpResponse(
+                "<h1>Access Denied</h1>"
+                "<p>You do not have permission to access this report.</p>"
+                "<p>Users can only access their own diagnostic reports.</p>",
+                status=403
+            )
+        
+        # Return report as plain text (patched: no confidential data exposure to unauthorized users)
         response_text = f"SECURE REPORT #{report.id}\nTechnician: {report.technician_name}\nContent: {report.content}"
         return HttpResponse(response_text, content_type="text/plain")
         
     except DiagnosticReport.DoesNotExist:
-        return HttpResponse("Access Denied or Report Not Found", status=403)
+        return HttpResponse("Report Not Found", status=404)
 
 # FIX: SSRF (CWE-918)
 # Allowlist approach - only trusted domains permitted
@@ -175,7 +203,9 @@ def patched_maintenance_interface(request):
         )
     
     # Get devices in maintenance
-    maintenance_devices = Device.objects.filter(status='Maintenance').order_by('-is_locked_out', 'name')
+    # CRITICAL: Exclude NUCLEAR devices - critical infrastructure should never be visible
+    # Defense-in-depth: Even admins cannot see NUCLEAR-CORE devices in maintenance interface
+    maintenance_devices = Device.objects.filter(status='Maintenance').exclude(name__icontains='NUCLEAR').order_by('-is_locked_out', 'name')
     
     # Get recent maintenance logs (last 50)
     recent_logs = MaintenanceLog.objects.select_related('device').order_by('-timestamp')[:50]
@@ -273,7 +303,8 @@ def patched_toggle_status(request, device_id):
             status=403
         )
     
-    if request.method == 'POST':
+    # Accept both GET and POST for toggle (GET for links, POST for forms)
+    if request.method in ['GET', 'POST']:
         try:
             device = Device.objects.get(id=device_id)
             
@@ -287,9 +318,13 @@ def patched_toggle_status(request, device_id):
             
             device.save()
             
-            # Check if coming from maintenance interface
+            # Check where to redirect based on where toggle was triggered
             referer = request.META.get('HTTP_REFERER', '')
-            if 'maintenance' in referer:
+            # If toggled FROM dashboard and device moved TO Maintenance, go to maintenance interface
+            # If toggled FROM maintenance, stay in maintenance interface
+            if 'dashboard' in referer and device.status == 'Maintenance':
+                return redirect('patched_maintenance_interface')
+            elif 'maintenance' in referer:
                 return redirect('patched_maintenance_interface')
             
             return redirect('patched_dashboard')

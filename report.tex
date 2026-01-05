@@ -50,7 +50,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \rhead{SCADA Security Lab Report}
-\lhead{CS458 - Cybersecurity}
+\lhead{CS437 - Cybersecurity}
 \rfoot{Page \thepage}
 
 \begin{document}
@@ -89,7 +89,7 @@
 % Executive Summary
 \section{Executive Summary}
 
-This report presents a comprehensive security analysis of a simulated SCADA (Supervisory Control and Data Acquisition) environment developed as part of the CS458 Cybersecurity course at Sabancı University. The project demonstrates critical vulnerabilities commonly found in industrial control systems and web applications, along with their secure implementations and monitoring mechanisms.
+This report presents a comprehensive security analysis of a simulated SCADA (Supervisory Control and Data Acquisition) environment developed as part of the CS437 Cybersecurity Practices & Applications course at Sabancı University. The project demonstrates critical vulnerabilities commonly found in industrial control systems and web applications, along with their secure implementations and monitoring mechanisms.
 
 \subsection{Project Scope}
 
@@ -411,9 +411,9 @@ def patched_dashboard(request):
 \subsection{Vulnerability 3: SQL Injection - Scenario 2 (Data Exfiltration) - CVE-2025-64459}
 
 \subsubsection{Description}
-Django ORM Q object abuse allowing OR-based filter injection. Admin users can bypass the default \texttt{is\_locked\_out=False} filter to reveal locked-out critical NUCLEAR devices.
+Django ORM Q object abuse allowing OR-based filter injection in two different scenarios. Admin users can manipulate query logic to bypass security filters and reveal hidden critical infrastructure.
 
-\subsubsection{Scenario}
+\subsubsection{Scenario 2a: Dashboard - Locked Device Revelation}
 By default, admin dashboard shows only non-locked devices. The NUCLEAR-CORE-CONTROLLER is permanently locked out (\texttt{is\_locked\_out=True}) for safety. An attacker with admin access can use SQL injection to reveal these hidden critical devices.
 
 \subsubsection{Vulnerable Code}
@@ -484,6 +484,28 @@ The SQL injection vulnerability exists exclusively in the admin code path. This 
     \item \textbf{Real-World Pattern:} Many breaches occur when attackers compromise admin accounts and exploit "power user" features lacking proper security
 \end{itemize}
 
+\subsubsection{Scenario 2b: Maintenance Interface - NUCLEAR-CORE Discovery}
+The maintenance interface contains a similar SQL injection vulnerability where admin users can manipulate the \texttt{connector} parameter to reveal NUCLEAR devices that should be hidden. By default, the maintenance view excludes NUCLEAR devices using the filter \texttt{\textasciitilde Q(name\_\_icontains='NUCLEAR')}, but the OR connector bypasses this restriction.
+
+\textbf{Exploitation:}
+\begin{lstlisting}[language=bash]
+# Normal maintenance view (NUCLEAR devices hidden)
+curl http://localhost:8000/vulnerable/maintenance/ -b cookies.txt
+# Shows: Only non-NUCLEAR devices in maintenance
+
+# SQL Injection - reveal NUCLEAR devices in maintenance
+curl "http://localhost:8000/vulnerable/maintenance/?connector=OR&name__icontains=NUCLEAR" -b cookies.txt
+# Shows: NUCLEAR-CORE devices revealed in maintenance interface
+\end{lstlisting}
+
+\textbf{Impact:}
+\begin{itemize}[leftmargin=*]
+    \item Bypasses need-to-know security policy for critical infrastructure
+    \item Reveals maintenance status of sensitive NUCLEAR systems
+    \item Enables targeted attacks on critical operational technology
+    \item Combined vulnerability: Auth Bypass $\rightarrow$ Admin Access $\rightarrow$ SQL Injection $\rightarrow$ NUCLEAR Discovery
+\end{itemize}
+
 \subsubsection{Patch Implementation}
 
 \begin{lstlisting}[language=Python]
@@ -507,7 +529,7 @@ def patched_dashboard(request):
     \item Explicit allowlist of accessible resources
 \end{itemize}
 
-\subsection{Vulnerability 4: IDOR - Insecure Direct Object Reference (Vulnerability A)}
+\subsection{Vulnerability 4: IDOR - Insecure Direct Object Reference (Vulnerability A - CWE-639)}
 
 \subsubsection{Description}
 Insecure Direct Object Reference (CWE-639) - IDOR vulnerability allowing users to access diagnostic reports by guessing report IDs without ownership verification.
@@ -562,7 +584,7 @@ def patched_report(request):
     \item Input validation and sanitization
 \end{itemize}
 
-\subsection{Vulnerability 5: Insecure Deserialization (Pickle RCE) - Vulnerability B}
+\subsection{Vulnerability 5: Insecure Deserialization (Pickle RCE) (Vulnerability B - CWE-502)}
 
 \subsubsection{Description}
 Insecure Deserialization vulnerability (CWE-502) - Deserialization bug where corrupted pickle payloads can crash the rendering engine or achieve Remote Code Execution (RCE).
@@ -634,7 +656,7 @@ def patched_deserialize(request):
     \item Sandboxing if deserialization is unavoidable
 \end{itemize}
 
-\subsection{Vulnerability 6: File Upload \& Overwrite (Vulnerabilities C \& E)}
+\subsection{Vulnerability 6: File Upload \& Overwrite (Vulnerabilities C \& E - CWE-434)}
 
 \subsubsection{Description}
 Two related file upload vulnerabilities:
@@ -723,7 +745,7 @@ def patched_upload(request):
 Classic XXE injection vulnerability (CWE-611) allowing attackers to steal data through XML external entity resolution.r uploaded files
 \end{itemize}
 
-\subsection{Vulnerability 6: XXE - XML External Entity Injection}
+\subsection{Vulnerability 7: XXE - XML External Entity Injection (Vulnerability G - CWE-611)}
 
 \subsubsection{Description}
 XML parser configured with \texttt{resolve\_entities=True} allows reading arbitrary files.
@@ -798,12 +820,10 @@ def patched_upload(request):
     \item Use secure XML parsing libraries (defusedxml)
     \item Input validation and sanitization
 \end{itemize}
-8: Race Condition in File Generation (Vulnerability D - Unsafe Temp Files)}
+\subsection{Vulnerability 8: Race Condition in File Generation (Vulnerability D - Unsafe Temp Files - CWE-377)}
 
 \subsubsection{Description}
-Race condition vulnerability (CWE-377) due to predictable temporary file paths that are reused across users.
-\subsubsection{Description}
-Static temporary filename allows concurrent requests to overwrite each other's data, causing race condition vulnerabilities.
+Race condition vulnerability due to predictable temporary file paths that are reused across users. Static temporary filename allows concurrent requests to overwrite each other's data, causing race condition vulnerabilities.
 
 \subsubsection{Vulnerable Code}
 
@@ -865,12 +885,10 @@ def patched_report(request):
     \item Proper file locking mechanisms
     \item Cleanup temporary files after use
     \item Use secure temp file libraries (tempfile module)
-\end{itemize}9: SSRF - Server-Side Request Forgery (Vulnerability F)}
+\end{itemize}\subsection{Vulnerability 9: SSRF - Server-Side Request Forgery (Vulnerability F - CWE-918)}
 
 \subsubsection{Description}
-Server-Side Request Forgery vulnerability (CWE-918) - Application accepts arbitrary URLs and makes server-side requests without validation, allowing remote access to internal systems
-\subsubsection{Description}
-Application accepts arbitrary URLs and makes server-side requests without validation.
+Server-Side Request Forgery vulnerability allowing remote access to internal systems. Application accepts arbitrary URLs and makes server-side requests without validation.
 
 \subsubsection{Vulnerable Code}
 
@@ -930,11 +948,10 @@ def patched_ssrf(request):
     \item Block internal IP ranges (RFC 1918)
     \item Implement timeouts and rate limiting
 \end{itemize}
-10
-\subsection{Vulnerability 9: Security Misconfiguration - Unauthorized Access to Monitoring Logs (OWASP A05:2021)}
+\subsection{Vulnerability 10: Security Misconfiguration - Unauthorized Access to Monitoring Logs (OWASP A05:2021)}
 
 \subsubsection{Description}
-Security monitoring system allows unauthenticated/unauthorized users to access sensitive attack logs containing IP addresses, attack patterns, and system vulnerabilities. This information disclosure enables reconnaissance for future attacks.
+Security oversight allowing unauthenticated/unauthorized users to access sensitive monitoring logs. The monitoring system's log viewer endpoint lacks proper authorization checks, enabling any user to view attack logs containing IP addresses, attack patterns, and system vulnerabilities. This information disclosure represents a configuration oversight that enables reconnaissance for future attacks.
 
 \subsubsection{Vulnerable Code}
 
@@ -1039,8 +1056,7 @@ def log_viewer(request, filter_path=None):
 All admin action endpoints verify \texttt{user.is\_admin} and return HTTP 403 for unauthorized attempts.
 
 \newpage
-1
-\subsection{Vulnerability 10: SCADA Maintenance Mode Interface - Multiple Security Flaws (OWASP A01:2021 + A05:2021 + A07:2021)}
+\subsection{Vulnerability 11: SCADA Maintenance Mode Interface - Multiple Security Flaws (OWASP A01:2021 + A05:2021 + A07:2021)}
 
 \subsubsection{Description}
 The SCADA Maintenance Mode Interface is designed for managing devices under maintenance operations, including Lockout/Tagout (LOTO) status tracking, technician assignment, and maintenance log monitoring. However, the vulnerable implementation contains multiple critical security flaws: missing CSRF protection, lack of authorization checks, SQL injection vulnerabilities, information disclosure, and improper LOTO compliance validation. This combination allows any authenticated user to manipulate critical industrial maintenance operations without proper authorization.
@@ -1773,46 +1789,8 @@ SSRF & ✓ Internal Access & ✓ Blocked & ✓ Detected \\
     \item Scanner for active/passive vulnerability detection
 \end{itemize}
 
-\subsubsection{OWASP ZAP (Zed Attack Proxy)}
-Open-source web application security scanner used for automated testing:
-\begin{itemize}[leftmargin=*]
-    \item \textbf{Spider:} Automated crawling of vulnerable and patched endpoints
-    \item \textbf{Active Scanner:} Automated detection of:
-    \begin{itemize}
-        \item SQL Injection (CVE-2025-64459)
-        \item Authentication Bypass vulnerabilities
-        \item CSRF vulnerabilities
-        \item Server-Side Request Forgery (SSRF)
-        \item XXE (XML External Entity) injection
-        \item Information Disclosure (DEBUG mode)
-    \end{itemize}
-    \item \textbf{Fuzzer:} Input validation testing for file upload and deserialization endpoints
-    \item \textbf{HUD (Heads Up Display):} Real-time security analysis during manual testing
-\end{itemize}
-
-\textbf{ZAP Configuration for Testing:}
-\begin{lstlisting}[language=bash]
-# Quick scan of vulnerable application
-zap.sh -quickurl http://localhost:8000/vulnerable/ -quickout zap_report.html
-
-# Active scan with authentication context
-zap-cli quick-scan --self-contained --start-options "-config api.key=changeme" \
-  http://localhost:8000/vulnerable/login/
-
-# API scan
-zap-cli active-scan http://localhost:8000/vulnerable/dashboard/
-\end{lstlisting}
-
-\textbf{Detected by ZAP:}
-\begin{itemize}[leftmargin=*]
-    \item ✓ SQL Injection in dashboard filter (connector=OR parameter)
-    \item ✓ Authentication bypass via GET parameters (is\_admin=true)
-    \item ✓ CSRF tokens missing on maintenance actions
-    \item ✓ SSRF vulnerability in node check endpoint
-    \item ✓ XXE vulnerability in XML upload parser
-    \item ✓ Information Disclosure (DEBUG=True, detailed error pages)
-    \item ✓ Insecure Direct Object Reference (IDOR) in report downloads
-\end{itemize}
+\subsubsection{OWASP ZAP (Zed Attack Proxy) - Planned Testing}
+Open-source automated web application security scanner planned for comprehensive vulnerability validation. ZAP will be used to verify all identified vulnerabilities through automated scanning, including SQL injection detection, authentication bypass testing, CSRF validation, SSRF checks, XXE detection, and information disclosure analysis.
  
 \subsubsection{curl}
 Used for rapid manual testing and automation:

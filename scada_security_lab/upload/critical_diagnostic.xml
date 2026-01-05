@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<diagnostic>
+    <system>NUCLEAR-REACTOR-CORE</system>
+    <critical_config>
+        <temperature_threshold>850</temperature_threshold>
+        <pressure_limit>2500</pressure_limit>
+        <emergency_shutdown>ENABLED</emergency_shutdown>
+    </critical_config>
+</diagnostic>

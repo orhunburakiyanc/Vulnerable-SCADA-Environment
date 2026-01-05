@@ -10,7 +10,7 @@ This is a SCADA simulation environment. It's not real SCADA, obviously, because 
 
 I built this with three distinct components because I hate monolithic messes:
 
-1. **`vulnerable`**: This app is a disaster. It has 11 vulnerabilities (Auth Bypass, Privilege Escalation, SQLi, IDOR, XXE, Deserialization RCE, File Upload/Overwrite, Race Condition, SSRF, Security Misconfiguration, Maintenance Interface CSRF). It's written like a junior dev's first commit on a Friday afternoon.
+1. **`vulnerable`**: This app is a disaster. It has 11 vulnerabilities (Auth Bypass, Privilege Escalation, SQLi Scenarios 2a & 2b, IDOR [Vulnerability A], Deserialization RCE [Vulnerability B], File Upload/Overwrite [Vulnerabilities C & E], XXE [Vulnerability G], Race Condition [Vulnerability D], SSRF [Vulnerability F], Security Misconfiguration, Maintenance Interface CSRF). It's written like a junior dev's first commit on a Friday afternoon.
 2. **`patched`**: This is how code *should* be written. Input sanitization, parameterized queries, CSRF protection, session management, and proper authorization checks. It actually works.
 3. **`monitoring`**: A comprehensive security monitoring system. It detects 13 attack types, classifies severity (CRITICAL/HIGH/MEDIUM/LOW), tracks brute force attempts (5 failures/5min), and provides admin controls (block IP, revoke session, resolve incidents). Includes statistics dashboard and detailed logging.
 
@@ -138,38 +138,45 @@ Go to these URLs (or just use the Navbar) to see bad code in action.
   * *Why:* URL parameters can overwrite session data.
   * *Impact:* Regular users can gain admin privileges via URL manipulation.
 
-* **SQL Injection (ORM Filter Bypass):** `/vulnerable/dashboard/?connector=OR&name__icontains=NUCLEAR`
-  * *Why:* Dynamic query building with user-controlled connector logic.
-  * *Visual:* If successful, the hidden **"NUCLEAR-CORE-CONTROLLER"** will appear in the dashboard with a **Red Background** and 🔒 locked status.
-  * *Admin Only:* This vulnerability requires admin privileges (chain with Auth Bypass or Privilege Escalation).
+* **SQL Injection - Scenario 2a (Dashboard - Locked Device Revelation):** `/vulnerable/dashboard/?connector=OR&is_locked_out=True`
+  * *Why:* Dynamic query building with user-controlled connector logic allows bypassing default filters.
+  * *Impact:* Reveals locked-out devices including **"NUCLEAR-CORE-CONTROLLER"** with **Red Background** and 🔒 locked status.
+  * *Admin Only:* Requires admin privileges (chain with Auth Bypass or Privilege Escalation).
 
-* **IDOR (Insecure Direct Object Reference):** `/vulnerable/report/?id=103`
-  * *Why:* No authorization check on report access. Enumerate IDs 103-143 to access all diagnostic reports including admin secrets.
-  * *Exploit:* `for i in {103..143}; do curl "http://localhost:8000/vulnerable/report/?id=$i" -o "report_$i.pdf"; done`
+* **SQL Injection - Scenario 2b (Maintenance - NUCLEAR Discovery):** `/vulnerable/maintenance/?connector=OR&name__icontains=NUCLEAR`
+  * *Why:* Similar ORM filter bypass in maintenance interface allows revealing hidden NUCLEAR devices.
+  * *Impact:* Bypasses need-to-know security policy, exposes critical infrastructure in maintenance mode.
+  * *Admin Only:* Requires admin privileges.
 
-* **File Upload/Overwrite:** `/vulnerable/upload/`
-  * *Why:* No filename sanitization, same filename overwrites previous file. Upload `diagnostic_script.txt` with malicious content.
-  * *Impact:* Backdoor installation, production script replacement, no file versioning.
+* **IDOR (Insecure Direct Object Reference) [Vulnerability A - CWE-639]:** `/vulnerable/report/?id=103`
+  * *Why:* No authorization check on report access. Enumerate IDs 103-153 to access all diagnostic reports including admin secrets.
+  * *Exploit:* `for i in {103..153}; do curl "http://localhost:8000/vulnerable/report/?id=$i" -o "report_$i.pdf"; done`
 
-* **XXE (XML External Entity):** `/vulnerable/upload/`
-  * *Why:* `resolve_entities=True` in the XML parser. Upload malicious XML to read local files like `/etc/passwd`.
-  * *Example Output:* Full system user list including root, daemon, www-data accounts.
+* **File Upload/Overwrite [Vulnerabilities C & E - CWE-434]:** `/vulnerable/upload/`
+  * *Why:* No filename sanitization or file type validation. Same filename overwrites previous file. Upload `diagnostic_script.txt` or dangerous file types (.php, .sh, .py).
+  * *Impact:* Backdoor installation, production script replacement, no file versioning, unrestricted upload of dangerous file types.
 
-* **Deserialization RCE:** `/vulnerable/deserialize/`
+* **XXE (XML External Entity) [Vulnerability G - CWE-611]:** `/vulnerable/upload/`
+  * *Why:* `resolve_entities=True` in the XML parser. Upload malicious XML to read local files like `/etc/passwd`, `/etc/hostname`, or container files.
+  * *Example Output:* Full system user list including root, daemon, www-data accounts. Successful file reads even when XML parsing appears to fail.
+
+* **Deserialization RCE [Vulnerability B - CWE-502]:** `/vulnerable/deserialize/`
   * *Why:* Accepts Base64 encoded `pickle` data without validation. RCE via `__reduce__()` method.
-  * *Exploit:* Use `python3 create_pickle_payload.py` to generate payload, verify with `docker compose exec web cat /tmp/pwned.txt`
+  * *Exploit:* Upload malicious pickle file to execute arbitrary commands, verify with `docker compose exec web cat /tmp/pwned.txt`. Corrupted payloads can crash the server.
 
-* **Race Condition:** `/vulnerable/report/`
-  * *Why:* Uses static filename `/tmp/scada_report_temp.pdf` for all reports. Concurrent requests can leak data.
+* **Race Condition [Vulnerability D - CWE-377 - Unsafe Temp Files]:** `/vulnerable/report/`
+  * *Why:* Uses predictable static filename `/tmp/scada_report_temp.pdf` for all reports. Concurrent requests can overwrite each other's data, causing information disclosure.
+  * *Impact:* User A's sensitive report data may leak to User B if requests are timed correctly.
 
-* **SSRF (Server-Side Request Forgery):** `/vulnerable/ssrf/`
-  * *Why:* It blindly takes a URL and runs `urllib.request.urlopen()`. Try accessing `http://127.0.0.1:8000/admin/`.
+* **SSRF (Server-Side Request Forgery) [Vulnerability F - CWE-918]:** `/vulnerable/ssrf/`
+  * *Why:* No URL validation before `urllib.request.urlopen()`. Server makes arbitrary requests to attacker-controlled URLs.
+  * *Exploit:* Access internal services (`http://127.0.0.1:8000/admin/`), scan internal network, exfiltrate data via webhook.site, access cloud metadata endpoints.
 
-* **Security Misconfiguration:** 
-  * *Why:* OWASP A05:2021 - DEBUG mode enabled, security logs accessible without authorization.
-  * *Impact 1:* Wrong credentials show Django debug page with SECRET_KEY, database paths, environment variables.
-  * *Impact 2:* `/monitoring/` page accessible to all users (no admin check), exposing attack logs and security events.
-  * *Fix in Patched:* DEBUG=False, admin-only access to monitoring dashboard.
+* **Security Misconfiguration - Unauthorized Monitoring Logs Access:** 
+  * *Why:* OWASP A05:2021 - Security oversight where `/monitoring/` endpoint lacks authorization checks, allowing any user to access sensitive attack logs.
+  * *Impact:* Information disclosure of attacker IPs, attack patterns, system vulnerabilities, blocked IPs, and security events. Enables reconnaissance for future attacks.
+  * *Additional Issue:* DEBUG mode enabled shows detailed error pages with SECRET_KEY, database paths, environment variables on authentication failures.
+  * *Fix in Patched:* Admin-only access to monitoring dashboard with proper authorization checks.
 
 * **Maintenance Interface CSRF/Authorization:** `/vulnerable/maintenance/`
   * *Why:* OWASP A01:2021 + A05:2021 + A07:2021 - Missing server-side authorization check (only client-side redirect).

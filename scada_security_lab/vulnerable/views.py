@@ -58,7 +58,7 @@ def vulnerable_login(request):
             # 3. Check for Admin (Relaxed check: allows 'True', 'true', or '1')
             admin_value = str(user_data.get('is_admin')).lower()
             if admin_value in ['true', '1']:
-                print("DEBUG: LOGIN SUCCESS - Admin access granted via exploit!")
+                print("DEBUG: LOGIN SUCCESS - Admin access granted")
                 request.session['user'] = user_data
                 return redirect('vulnerable_dashboard')
             else:
@@ -73,6 +73,7 @@ def vulnerable_login(request):
 # URL parameters override session data + OR filter injection reveals hidden NUCLEAR devices
 # Attack 1: /vulnerable/dashboard/?is_admin=true (Privilege Escalation)
 # Attack 2: /vulnerable/dashboard/?connector=OR&name__icontains=NUCLEAR (Data Exfiltration)
+# Attack 3: /vulnerable/dashboard/?connector=OR&is_locked_out=True
 def vulnerable_dashboard(request):
     # Ensure user is logged in (from Scenario 1)
     if 'user' not in request.session:
@@ -96,22 +97,23 @@ def vulnerable_dashboard(request):
     
     is_admin = user_data.get('is_admin', False)
     
-    # Admin sees ALL devices (including Maintenance), regular users only see Operational
+    # Admin and regular users both see only unlocked devices initially
+    # SQL injection reveals locked out devices (including NUCLEAR if targeted)
     if is_admin:
-        # Admin can use SQL injection to reveal hidden CRITICAL devices
+        # Admin can use SQL injection to reveal locked out devices
         connector = request.GET.get('connector', 'AND')
         filter_params = request.GET.copy()
         
         for param in ['connector', 'is_admin', 'is_superuser']:
             filter_params.pop(param, None)
         
-        # Default: Admin sees non-critical devices (NUCLEAR hidden for "security")
-        # VULNERABILITY: Critical devices like NUCLEAR are hidden even from admin
-        # This simulates overly restrictive "need-to-know" policy
-        query = Q(is_locked_out=False) & ~Q(name__icontains='NUCLEAR')
+        # Default: Admin sees only operational, non-locked devices
+        # VULNERABILITY: Locked out devices (including NUCLEAR) are hidden
+        query = Q(is_locked_out=False)
         
         # THE BUG: Admin can inject filters with OR connector
-        # Attack: ?connector=OR&name__icontains=NUCLEAR reveals critical devices
+        # Attack: ?connector=OR&is_locked_out=True reveals all locked devices
+        # Attack: ?connector=OR&name__icontains=NUCLEAR reveals NUCLEAR specifically
         for key, value in filter_params.items():
             if connector == 'OR':
                 query |= Q(**{key: value})
@@ -120,7 +122,7 @@ def vulnerable_dashboard(request):
         
         devices = Device.objects.filter(query)
     else:
-        # Regular users only see Operational devices (can't see Maintenance or locked)
+        # Regular users only see Operational, non-locked devices (hardcoded, safe)
         devices = Device.objects.filter(status='Operational', is_locked_out=False)
     
     context = {
@@ -145,6 +147,7 @@ def vulnerable_upload(request):
         if fs.exists(uploaded_file.name):
             fs.delete(uploaded_file.name) # Explicitly delete old file to allow overwrite
         
+        # There is no validation !!
         filename = fs.save(uploaded_file.name, uploaded_file)
         file_path = fs.path(filename)
         
@@ -252,7 +255,11 @@ def vulnerable_deserialize(request):
             try:
                 temp_result = DiagnosticResult(serialized_data=payload)
                 data = temp_result.get_data()  # Pickle deserialization RCE
-                
+                #def get_data(self): THIS IS THE PROBLEM !
+                #   decoded = base64.b64decode(self.serialized_data)
+                #  return pickle.loads(decoded)  # VULNERABLE TO RCE!
+
+
                 status = "Object Deserialized Successfully!"
                 output = f"Decoded Data: {data}"
             except Exception as e:
@@ -280,9 +287,12 @@ def vulnerable_ssrf(request):
 
 # VULNERABILITY 10: Client-Side Authorization Bypass (CWE-602)
 # VULNERABILITY 11: CSRF on maintenance actions (CWE-352)
+# SQL INJECTION (CVE-2025-64459) - Scenario 2b: NUCLEAR-CORE Data Exfiltration
+@csrf_exempt
 def maintenance_interface(request):
     """
-    Client-side JavaScript blocks non-admin users (bypassable)
+    Admin can see locked out devices, but NUCLEAR-CORE is hidden by policy.
+    SQL injection with connector=OR reveals NUCLEAR-CORE-CONTROLLER.
     """
     if 'user' not in request.session:
         return redirect('vulnerable_login')
@@ -290,8 +300,60 @@ def maintenance_interface(request):
     user_data = request.session['user']
     is_admin = user_data.get('is_admin', False)
     
-    # Get devices in maintenance
-    maintenance_devices = Device.objects.filter(status='Maintenance').order_by('-is_locked_out', 'name')
+    # Handle POST requests (maintenance actions) - CSRF vulnerability!
+    if request.method == 'POST':
+        device_id = request.POST.get('device_id')
+        action = request.POST.get('action')
+        technician = request.POST.get('technician', 'Unknown')
+        
+        try:
+            device = Device.objects.get(id=device_id)
+            
+            if action == 'start_maintenance':
+                device.status = 'Maintenance'
+                device.save()
+                MaintenanceLog.objects.create(device=device, technician_name=technician, action='Started Maintenance')
+            elif action == 'end_maintenance':
+                device.status = 'Operational'
+                device.save()
+                MaintenanceLog.objects.create(device=device, technician_name=technician, action='Ended Maintenance')
+            elif action == 'lockout':
+                device.is_locked_out = True
+                device.save()
+                MaintenanceLog.objects.create(device=device, technician_name=technician, action='Locked Out (LOTO)')
+            elif action == 'unlock':
+                device.is_locked_out = False
+                device.save()
+                MaintenanceLog.objects.create(device=device, technician_name=technician, action='Unlocked')
+            
+            return redirect('maintenance_interface')
+        except Exception as e:
+            pass  # Continue to render page with error
+    
+    if is_admin:
+        # Admin sees maintenance devices with SQL injection vulnerability
+        connector = request.GET.get('connector', 'AND')
+        filter_params = request.GET.copy()
+        
+        for param in ['connector', 'is_admin', 'is_superuser']:
+            filter_params.pop(param, None)
+        
+        # Default: Admin sees locked out devices but NUCLEAR is hidden for security
+        # This simulates "need-to-know" policy - even admins can't see nuclear reactor controls
+        query = Q(status='Maintenance') & ~Q(name__icontains='NUCLEAR')
+        
+        # VULNERABILITY: Admin can inject OR filter to reveal NUCLEAR-CORE
+        # Attack: ?connector=OR&name__icontains=NUCLEAR
+        for key, value in filter_params.items():
+            if connector == 'OR':
+                query |= Q(**{key: value})
+            else:
+                query &= Q(**{key: value})
+        
+        maintenance_devices = Device.objects.filter(query).order_by('-is_locked_out', 'name')
+    else:
+        # Regular users shouldn't access maintenance at all (client-side only check)
+        maintenance_devices = Device.objects.none()
     
     # Get recent maintenance logs (last 50)
     recent_logs = MaintenanceLog.objects.select_related('device').order_by('-timestamp')[:50]
