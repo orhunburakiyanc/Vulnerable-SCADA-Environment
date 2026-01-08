@@ -22,6 +22,7 @@ class SecurityMonitorMiddleware:
         self.get_response = get_response
         self.failed_404_attempts = {}  # IP -> [timestamps] for directory scanning
         self.suspicious_sessions = {}  # Session -> metadata
+        self.recent_attacks = {}  # (IP, attack_type) -> timestamp for deduplication
 
     def __call__(self, request):
         ip_address = request.META.get('REMOTE_ADDR', '127.0.0.1')
@@ -33,11 +34,16 @@ class SecurityMonitorMiddleware:
         # If blocked, we immediately return 403 Forbidden."
         # =====================================================================
         if BlockedIP.objects.filter(ip_address=ip_address).exists():
-            return HttpResponseForbidden(
+            response = HttpResponseForbidden(
                 "<h1>403 Forbidden</h1>"
                 "<p>Your IP address has been blocked due to suspicious activity.</p>"
                 "<p>Contact the administrator if you believe this is an error.</p>"
             )
+            # Prevent browser caching and back button
+            response['Cache-Control'] = 'no-cache, no-store, must-revalidate, private'
+            response['Pragma'] = 'no-cache'
+            response['Expires'] = '0'
+            return response
         
         # Capture the full URL and POST body for analysis
         full_path = request.get_full_path()
@@ -57,42 +63,50 @@ class SecurityMonitorMiddleware:
         reverse_action = 'No action to reverse'
         
         # =====================================================================
-        # VULNERABILITY DETECTION #1: BRUTE FORCE ATTACK
-        # Location: check_brute_force() function (Line ~175)
+        # VULNERABILITY DETECTION #1: AUTHENTICATION BYPASS (CVE-2025-64459)
+        # Endpoint: /login/ - PRIORITY CHECK (before Brute Force)
         # =====================================================================
-        # : "The first check is for Brute Force attacks. We track
-        # login attempts per IP. If we see 5 or more attempts in 5 minutes,
-        # we flag it as CRITICAL. 3-4 attempts is flagged as HIGH."
-        # 
-        # Detection Logic:
-        # - Monitors /login/ endpoint
-        # - Counts FailedLoginAttempt records per IP in last 5 minutes
-        # - 5+ attempts = CRITICAL, 3-4 attempts = HIGH
-        # =====================================================================
-        brute_force_detected, bf_severity, bf_action = self.check_brute_force(ip_address, endpoint, request)
-        if brute_force_detected:
-            attack_detected = 'Brute Force Attack'
-            severity = bf_severity
-            recommended_action = bf_action
-            reverse_action = f'Unblock IP {ip_address} and clear failed login attempts'
-        
-        # =====================================================================
-        # VULNERABILITY DETECTION #2: AUTHENTICATION BYPASS (CVE-2025-64459)
-        # Endpoint: /login/
-        # =====================================================================
-        # : "Next, we check for Authentication Bypass on the login
-        # endpoint. We use regex to detect 'is_admin=true' or 'superuser=' in
-        # the URL parameters. This catches dictionary expansion attacks."
+        # "First priority is SQL Injection with connector parameter.
+        # We check for 'connector=' which allows OR/AND manipulation in Q() objects.
+        # Also detects is_admin, is_superuser parameters for auth bypass."
         #
-        # Detection Pattern: is_admin=true, is_admin=1, superuser=
+        # Detection Pattern: connector=, is_admin=, is_superuser=
         # Severity: CRITICAL
         # =====================================================================
-        elif '/login/' in endpoint:
-            if re.search(r"(?i)(is_admin=true|is_admin=1|superuser=)", search_space):
-                attack_detected = 'Authentication Bypass (CVE-2025-64459)'
+        if '/login/' in endpoint:
+            # Priority 1: SQL Injection via connector parameter (CVE-2025-64459)
+            if re.search(r"(?i)(connector=)", search_space):
+                attack_detected = 'SQL Injection - CVE-2025-64459 (Q connector bypass)'
+                severity = 'CRITICAL'
+                recommended_action = 'IMMEDIATE ACTION: Block IP, revoke all sessions from this IP, review authentication logs, check for unauthorized superuser access'
+                reverse_action = f'Unblock IP {ip_address} if false positive'
+            # Priority 2: Parameter injection (is_superuser, is_admin)
+            elif re.search(r"(?i)(is_admin=|is_superuser=|superuser=)", search_space):
+                attack_detected = 'Authentication Bypass - Parameter Injection (CVE-2025-64459)'
                 severity = 'CRITICAL'
                 recommended_action = 'IMMEDIATE ACTION: Block IP, revoke all sessions from this IP, review authentication logs'
                 reverse_action = f'Unblock IP {ip_address} if false positive'
+        
+        # =====================================================================
+        # VULNERABILITY DETECTION #2: BRUTE FORCE ATTACK
+        # Location: check_brute_force() function (Line ~175)
+        # =====================================================================
+        # : "Check for Brute Force attacks AFTER SQL injection checks.
+        # We track login attempts per IP. If we see 10 or more attempts in 1 minute,
+        # we flag it as CRITICAL. 7+ attempts is flagged as HIGH."
+        # 
+        # Detection Logic:
+        # - Monitors /login/ endpoint
+        # - Counts FailedLoginAttempt records per IP in last 1 minute
+        # - 10+ attempts = CRITICAL, 7+ attempts = HIGH
+        # =====================================================================
+        if not attack_detected:  # Only check if no critical attack detected
+            brute_force_detected, bf_severity, bf_action = self.check_brute_force(ip_address, endpoint, request)
+            if brute_force_detected:
+                attack_detected = 'Brute Force Attack'
+                severity = bf_severity
+                recommended_action = bf_action
+                reverse_action = f'Unblock IP {ip_address} and clear failed login attempts'
         
         # =====================================================================
         # VULNERABILITY DETECTION #3 & #4: PRIVILEGE ESCALATION + SQL INJECTION
@@ -112,7 +126,7 @@ class SecurityMonitorMiddleware:
         # - SQL Injection: connector=OR, name__icontains=NUCLEAR, UNION SELECT
         # Severity: CRITICAL for both
         # =====================================================================
-        elif '/dashboard/' in endpoint:
+        if not attack_detected and '/dashboard/' in endpoint:
             # Privilege Escalation check (most specific first)
             if re.search(r"(?i)(is_admin=true|is_admin=1|is_superuser=true|is_superuser=1)", search_space):
                 attack_detected = 'Privilege Escalation (CVE-2025-64459)'
@@ -151,7 +165,7 @@ class SecurityMonitorMiddleware:
         # - Dangerous Extensions: .php, .exe, .sh, .bat, .jsp, .asp, .py
         # - Overwrite: FileSystemStorage.exists(filename)
         # =====================================================================
-        elif '/upload/' in endpoint:            
+        if not attack_detected and '/upload/' in endpoint:            
             # XXE Detection (Check POST body for XML entities)
             if re.search(r"(?i)(<!ENTITY|<!DOCTYPE.*SYSTEM|SYSTEM\s+[\"']file://)", body_content):
                 attack_detected = 'XXE (XML External Entity)'
@@ -198,7 +212,7 @@ class SecurityMonitorMiddleware:
         # Detection: Any request with id= parameter to /report/ endpoint
         # Severity: HIGH
         # =====================================================================
-        elif '/report/' in endpoint:
+        if not attack_detected and '/report/' in endpoint:
             if 'id=' in full_path:
                 report_id = re.search(r'id=(\d+)', full_path)
                 if report_id:
@@ -220,7 +234,7 @@ class SecurityMonitorMiddleware:
         # Detection: Any POST request to /deserialize/
         # Severity: CRITICAL (always)
         # =====================================================================
-        elif '/deserialize/' in endpoint:
+        if not attack_detected and '/deserialize/' in endpoint:
             if request.method == 'POST':
                 attack_detected = 'Insecure Deserialization (Pickle RCE)'
                 severity = 'CRITICAL'
@@ -239,7 +253,7 @@ class SecurityMonitorMiddleware:
         # Detection Pattern: localhost, 127.0.0.1, file://, 0.0.0.0, 169.254
         # Severity: HIGH
         # =====================================================================
-        elif '/ssrf/' in endpoint or '/node_check/' in endpoint:
+        if not attack_detected and ('/ssrf/' in endpoint or '/node_check/' in endpoint):
             if 'url=' in search_space:
                 if re.search(r"(?i)(localhost|127\.0\.0\.1|file://|0\.0\.0\.0|169\.254)", search_space):
                     attack_detected = 'SSRF (Server-Side Request Forgery)'
@@ -294,38 +308,90 @@ class SecurityMonitorMiddleware:
         # =====================================================================
         # ATTACK LOGGING AND AUTO-BLOCKING
         # =====================================================================
-        # : "When an attack is detected, we create an AttackLog
+        # "When an attack is detected, we create an AttackLog
         # entry with all details: IP, endpoint, attack type, severity, and
         # recommended actions. For CRITICAL attacks, we automatically block
         # the IP address if auto-blocking is enabled."
         # =====================================================================
         if attack_detected:
-            log_entry = AttackLog.objects.create(
-                ip_address=ip_address,
-                endpoint=endpoint,
-                attack_type=attack_detected,
-                payload=full_path[:500],
-                severity=severity,
-                recommended_action=recommended_action,
-                reverse_action=reverse_action
-            )
-            print(f"!!! [{severity}] SECURITY ALERT: {attack_detected} from {ip_address} on {endpoint} !!!")
+            # Deduplication: Prevent duplicate logs for same attack within 5 seconds
+            # For IDOR and parametric attacks, include the full path in the key
+            attack_key = (ip_address, attack_detected, full_path)
+            now = timezone.now()
             
-            # Auto-blocking for CRITICAL severity attacks
-            auto_block_enabled = getattr(settings, 'ENABLE_AUTO_BLOCKING', True)
+            should_log = True
+            if attack_key in self.recent_attacks:
+                last_seen = self.recent_attacks[attack_key]
+                if (now - last_seen).total_seconds() < 5:
+                    # Skip logging - same attack detected within 5 seconds
+                    print(f"[DEDUP] Skipping duplicate {attack_detected} from {ip_address}")
+                    should_log = False
             
-            if auto_block_enabled and severity == 'CRITICAL' and not BlockedIP.objects.filter(ip_address=ip_address).exists():
-                BlockedIP.objects.create(
+            # Log this attack (if not duplicate)
+            if should_log:
+                self.recent_attacks[attack_key] = now
+                
+                log_entry = AttackLog.objects.create(
                     ip_address=ip_address,
-                    reason=f"Auto-blocked: {attack_detected}",
-                    blocked_by='SYSTEM_AUTO',
-                    related_log=log_entry
+                    endpoint=endpoint,
+                    attack_type=attack_detected,
+                    payload=full_path[:500],
+                    severity=severity,
+                    recommended_action=recommended_action,
+                    reverse_action=reverse_action
                 )
-                log_entry.action_taken = 'AUTO_BLOCKED'
-                log_entry.save()
-                print(f"!!! IP {ip_address} AUTOMATICALLY BLOCKED !!!")
+                print(f"!!! [{severity}] SECURITY ALERT: {attack_detected} from {ip_address} on {endpoint} !!!")
+                
+                # Auto-blocking for CRITICAL severity attacks
+                auto_block_enabled = getattr(settings, 'ENABLE_AUTO_BLOCKING', True)
+                
+                if auto_block_enabled and severity == 'CRITICAL':
+                    if not BlockedIP.objects.filter(ip_address=ip_address).exists():
+                        BlockedIP.objects.create(
+                            ip_address=ip_address,
+                            reason=f"Auto-blocked: {attack_detected}",
+                            blocked_by='SYSTEM_AUTO',
+                            related_log=log_entry
+                        )
+                        log_entry.action_taken = 'AUTO_BLOCKED'
+                        log_entry.save()
+                        print(f"!!! IP {ip_address} AUTOMATICALLY BLOCKED !!!")
+                        
+                        # Immediately return 403 Forbidden after blocking
+                        response = HttpResponseForbidden(
+                            "<h1>403 Forbidden - Auto-Blocked</h1>"
+                            "<p>Your IP address has been automatically blocked due to critical security violation.</p>"
+                            f"<p>Attack Type: {attack_detected}</p>"
+                            "<p>Contact the administrator if you believe this is an error.</p>"
+                        )
+                        # Prevent browser caching and back button
+                        response['Cache-Control'] = 'no-cache, no-store, must-revalidate, private'
+                        response['Pragma'] = 'no-cache'
+                        response['Expires'] = '0'
+                        return response
+            
+            # If already blocked (duplicate or previous block), return 403
+            if BlockedIP.objects.filter(ip_address=ip_address).exists():
+                response = HttpResponseForbidden(
+                    "<h1>403 Forbidden</h1>"
+                    "<p>Your IP address has been blocked due to suspicious activity.</p>"
+                    "<p>Contact the administrator if you believe this is an error.</p>"
+                )
+                # Prevent browser caching and back button
+                response['Cache-Control'] = 'no-cache, no-store, must-revalidate, private'
+                response['Pragma'] = 'no-cache'
+                response['Expires'] = '0'
+                return response
 
         response = self.get_response(request)
+        
+        # Add cache-control headers to HTML responses to prevent back button issues
+        # Don't apply to static files (CSS, JS, images)
+        content_type = response.get('Content-Type', '')
+        if 'text/html' in content_type:
+            response['Cache-Control'] = 'no-cache, no-store, must-revalidate, private'
+            response['Pragma'] = 'no-cache'
+            response['Expires'] = '0'
         
         # =====================================================================
         # VULNERABILITY DETECTION #12: DIRECTORY SCANNING
@@ -346,11 +412,11 @@ class SecurityMonitorMiddleware:
     # =========================================================================
     # : "This function tracks login attempts per IP address.
     # We store each attempt in the FailedLoginAttempt model and count
-    # how many occurred in the last 5 minutes."
+    # how many occurred in the last 1 minute."
     #
-    # Thresholds:
-    # - 5+ attempts in 5 min = CRITICAL (auto-block)
-    # - 3-4 attempts in 5 min = HIGH (warning)
+    # Thresholds (increased to avoid false positives):
+    # - 10+ attempts in 1 min = CRITICAL (auto-block)
+    # - 7+ attempts in 1 min = HIGH (warning)
     # =========================================================================
     def check_brute_force(self, ip, endpoint, request):
         """Detect brute force login attempts"""
@@ -358,15 +424,9 @@ class SecurityMonitorMiddleware:
             return False, 'LOW', ''
         
         now = timezone.now()
-        five_minutes_ago = now - timedelta(minutes=5)
+        one_minutes_ago = now - timedelta(minutes=1)
         
-        # Count recent failed attempts from this IP
-        recent_attempts = FailedLoginAttempt.objects.filter(
-            ip_address=ip,
-            timestamp__gte=five_minutes_ago
-        ).count()
-        
-        # Log this attempt
+        # Log this attempt FIRST (before counting)
         if request.method in ['GET', 'POST']:
             FailedLoginAttempt.objects.create(
                 ip_address=ip,
@@ -374,10 +434,17 @@ class SecurityMonitorMiddleware:
                 endpoint=endpoint
             )
         
-        if recent_attempts >= 5:
-            return True, 'CRITICAL', f'IMMEDIATE: Block IP {ip} - Brute force detected ({recent_attempts} attempts in 5 minutes)'
-        elif recent_attempts >= 3:
-            return True, 'HIGH', f'Monitor IP {ip} closely - Multiple login attempts ({recent_attempts})'
+        # Count recent failed attempts from this IP (including current one)
+        recent_attempts = FailedLoginAttempt.objects.filter(
+            ip_address=ip,
+            timestamp__gte=one_minutes_ago
+        ).count()
+        
+        # Higher thresholds to avoid false positives from normal browser usage
+        if recent_attempts >= 10:
+            return True, 'CRITICAL', f'IMMEDIATE: Block IP {ip} - Brute force detected ({recent_attempts} attempts in 1 minute)'
+        elif recent_attempts >= 7:
+            return True, 'HIGH', f'Monitor IP {ip} closely - Multiple login attempts ({recent_attempts} in 1 minute)'
         
         return False, 'LOW', ''
     

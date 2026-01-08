@@ -2,6 +2,7 @@ import urllib.request
 from lxml import etree # For the XXE vulnerability
 from django.conf import settings
 from django.contrib.auth import authenticate, login
+from django.contrib.auth.models import User
 from django.core.files.storage import FileSystemStorage
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render, redirect
@@ -38,9 +39,65 @@ def vulnerable_login(request):
         else:
             return render(request, 'vulnerable/login.html', {'error': 'Invalid username or password'})
     
-    # GET: Auth bypass vulnerability
+    # GET: CVE-2025-64459 SQL Injection via _connector parameter
     if request.method == "GET":
-        if 'username' in request.GET:
+        if 'username' in request.GET and 'connector' in request.GET:
+            # CVE-2025-64459: Q() object with _connector manipulation allows SQL injection
+            # Attack: /vulnerable/login/?username=hacker&connector=OR&is_superuser=True
+            
+            username = request.GET.get('username')
+            connector = request.GET.get('connector', 'AND').upper()  # Attacker-controlled
+            
+            print(f"DEBUG [CVE-2025-64459]: Attempting SQL injection with connector={connector}")
+            
+            try:
+                # Start with base query - username doesn't need to match
+                query = Q(username=username)
+                
+                # Build additional conditions from URL parameters
+                for key, value in request.GET.items():
+                    if key not in ['username', 'connector']:
+                        # Convert string 'True'/'False' to boolean
+                        if value.lower() in ['true', '1']:
+                            param_value = True
+                        elif value.lower() in ['false', '0']:
+                            param_value = False
+                        else:
+                            param_value = value
+                        
+                        # VULNERABILITY: connector allows OR injection
+                        # Normal: username='hacker' AND is_superuser=True (fails)
+                        # Attack: username='hacker' OR is_superuser=True (succeeds!)
+                        if connector == 'OR':
+                            query = query | Q(**{key: param_value})
+                        else:
+                            query = query & Q(**{key: param_value})
+                
+                print(f"DEBUG [CVE-2025-64459]: Query built with connector={connector}")
+                
+                # VULNERABLE: Execute the manipulated query
+                user = User.objects.filter(query).first()
+                
+                if user:
+                    # Successful SQL injection - login without password
+                    login(request, user)
+                    request.session['user'] = {
+                        'username': user.username,
+                        'is_admin': user.is_superuser
+                    }
+                    print(f"DEBUG [CVE-2025-64459]: SQL Injection successful! Logged in as {user.username} (superuser={user.is_superuser})")
+                    return redirect('vulnerable_dashboard')
+                else:
+                    error_msg = "SQL Injection failed: No user found with those conditions"
+                    print(f"DEBUG [CVE-2025-64459]: {error_msg}")
+                    return render(request, 'vulnerable/login.html', {'error': error_msg})
+            except Exception as e:
+                error_msg = f"SQL Injection error: {str(e)}"
+                print(f"DEBUG [CVE-2025-64459]: {error_msg}")
+                return render(request, 'vulnerable/login.html', {'error': error_msg})
+        
+        # Old dictionary expansion vulnerability (kept for backward compatibility)
+        elif 'username' in request.GET:
             # 1. Setup default user (Not Admin)
             user_data = {
                 'username': request.GET.get('username'),
@@ -366,7 +423,7 @@ def maintenance_interface(request):
         'total_maintenance': maintenance_devices.count(),
         'locked_out': maintenance_devices.filter(is_locked_out=True).count(),
         'total_logs': MaintenanceLog.objects.count(),
-        'active_technicians': technicians.count()
+        'active_technicians': len(set(technicians))  # Count unique technicians
     }
     
     context = {

@@ -218,7 +218,7 @@ def patched_maintenance_interface(request):
         'total_maintenance': maintenance_devices.count(),
         'locked_out': maintenance_devices.filter(is_locked_out=True).count(),
         'total_logs': MaintenanceLog.objects.count(),
-        'active_technicians': technicians.count()
+        'active_technicians': len(set(technicians))  # Count unique technicians
     }
     
     context = {
