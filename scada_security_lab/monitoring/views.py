@@ -3,6 +3,7 @@ from django.http import HttpResponse, JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from .models import AttackLog, BlockedIP, FailedLoginAttempt
+import csv
 
 def log_viewer(request, filter_path=None):
     """Display attack logs with severity, recommended actions, and admin controls"""
@@ -160,8 +161,14 @@ def resolve_log_action(request, log_id):
     return JsonResponse({'status': 'success', 'message': 'Log marked as resolved'})
 
 def export_logs(request):
-    """Export logs to CSV"""
-    import csv
+    """Export logs to CSV (Admin only)"""
+    # Check admin permission
+    user = request.session.get('user', {})
+    if not user.get('is_admin'):
+        return HttpResponse(
+            "<h1>Access Denied</h1><p>CSV export requires administrator privileges.</p>",
+            status=403
+        )
     
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="attack_logs.csv"'

@@ -87,7 +87,9 @@
                 </select>
             </div>
             <button type="submit" style="padding: 8px 20px; background: #1d4ed8; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem; margin-top: 22px;">Apply Filters</button>
-            <a href="{% url 'export_logs' %}" style="padding: 8px 20px; background: #047857; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 0.9rem; margin-top: 22px; display: inline-block;">Export CSV</a>
+            {% if user_is_admin %}
+            <button onclick="exportCSV()" type="button" style="padding: 8px 20px; background: #047857; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem; margin-top: 22px;">Export CSV</button>
+            {% endif %}
         </form>
     </div>
 </div>
@@ -301,6 +303,97 @@ function resolveLog(logId) {
             console.error('Error:', error);
             alert('Error resolving log: ' + error.message);
         });
+}
+
+function exportCSV() {
+    // Show loading state
+    var btn = event.target;
+    var originalText = btn.innerHTML;
+    btn.innerHTML = '⏳ Exporting...';
+    btn.disabled = true;
+    
+    try {
+        // Get the table
+        var table = document.querySelector('section table');
+        if (!table) {
+            throw new Error('Table not found');
+        }
+        
+        var csv = [];
+        
+        // Add headers
+        var headers = [];
+        var headerCells = table.querySelectorAll('thead th');
+        for (var i = 0; i < headerCells.length; i++) {
+            headers.push(escapeCsvValue(headerCells[i].textContent.trim()));
+        }
+        csv.push(headers.join(','));
+        
+        // Add data rows
+        var rows = table.querySelectorAll('tbody tr');
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            var cells = row.querySelectorAll('td');
+            
+            // Skip empty rows
+            if (cells.length === 0) continue;
+            
+            var rowData = [];
+            for (var j = 0; j < cells.length; j++) {
+                var cellText = cells[j].textContent.trim();
+                // Clean up the text (remove extra whitespace)
+                cellText = cellText.replace(/\s+/g, ' ');
+                rowData.push(escapeCsvValue(cellText));
+            }
+            csv.push(rowData.join(','));
+        }
+        
+        // Create CSV content
+        var csvContent = csv.join('\n');
+        
+        // Add BOM for Excel UTF-8 support
+        var BOM = '\uFEFF';
+        var blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+        
+        // Create download link
+        var url = window.URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        
+        // Generate filename with timestamp
+        var timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+        a.download = 'attack_logs_' + timestamp + '.csv';
+        
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        // Reset button
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+        
+        alert('CSV file downloaded successfully!');
+        
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error exporting CSV: ' + error.message);
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+function escapeCsvValue(value) {
+    // Escape quotes by doubling them
+    value = value.replace(/"/g, '""');
+    
+    // Wrap in quotes if contains comma, newline, or quote
+    if (value.indexOf(',') !== -1 || value.indexOf('\n') !== -1 || value.indexOf('"') !== -1) {
+        value = '"' + value + '"';
+    }
+    
+    return value;
 }
 </script>
 

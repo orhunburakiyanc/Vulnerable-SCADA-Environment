@@ -94,18 +94,31 @@ class SecurityMonitorMiddleware:
                         recommended_action = f'Delete uploaded file immediately, block IP, scan server for malware'
                         reverse_action = f'Unblock IP {ip_address}'
                         break
+                
+                # Check for file overwrite attempt (vulnerable endpoint allows overwriting existing files)
+                if not attack_detected:
+                    from django.core.files.storage import FileSystemStorage
+                    fs = FileSystemStorage(location='media/')
+                    for file_obj in request.FILES.values():
+                        if fs.exists(file_obj.name):
+                            attack_detected = 'File Overwrite Attack (CWE-434)'
+                            severity = 'MEDIUM'
+                            recommended_action = f'Review overwritten file: {file_obj.name}, backup original if critical'
+                            reverse_action = f'Restore original file {file_obj.name} from backup'
+                            break
         
-        # Report generation - IDOR
+        # Report generation - IDOR + Unsafe Temp Files
         elif '/report/' in endpoint:
             if 'id=' in full_path:
                 report_id = re.search(r'id=(\d+)', full_path)
                 if report_id:
                     id_val = int(report_id.group(1))
-                    if id_val <= 10:  # Admin reports (1-10)
-                        attack_detected = 'IDOR (Insecure Direct Object Reference)'
-                        severity = 'HIGH'
-                        recommended_action = f'Block IP, revoke session, audit accessed reports for ID {id_val}'
-                        reverse_action = f'Unblock IP {ip_address}, restore session'
+                    # IDOR detection: Any ID access without proper authorization check
+                    # Vulnerable endpoint doesn't verify ownership, so any ID request is suspicious
+                    attack_detected = 'IDOR + Unsafe Temp Files (CWE-639, CWE-377)'
+                    severity = 'HIGH'
+                    recommended_action = f'Block IP, revoke session, audit accessed reports for ID {id_val}. WARNING: Predictable temp file /tmp/scada_report_temp.pdf reused across users - potential data leakage!'
+                    reverse_action = f'Unblock IP {ip_address}, restore session, delete temp file'
         
         # Deserialize endpoint - Pickle deserialization
         elif '/deserialize/' in endpoint:
@@ -182,11 +195,11 @@ class SecurityMonitorMiddleware:
             self.track_404_attempts(ip_address)
         
         return response
-    
+    # Brute Force Attack
     def check_brute_force(self, ip, endpoint, request):
         """Detect brute force login attempts"""
-        if ip == '192.168.65.1':
-            return False, 'NONE', 'Localhost IP'
+        #if ip == '192.168.65.1':
+         #   return False, 'NONE', 'Localhost IP'
         if '/login/' not in endpoint:
             return False, 'LOW', ''
         
