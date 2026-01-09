@@ -100,8 +100,15 @@ docker compose exec web python manage.py populate_db
 Go to `http://localhost:8000`.
 
 **Test Credentials:**
-- Regular User: `user` / `user123`
-- Admin: `admin` / `admin123`
+- **Regular User (Field Technician)**: `user` / `user123`
+  - Role: Upload diagnostics, view reports, check remote nodes
+  - Cannot access: Dashboard (device list), Maintenance Interface
+- **Admin (System Administrator)**: `admin` / `admin123`
+  - Role: Full system access including device management
+  - Can access: All features including dashboard and maintenance
+
+**Role-Based Access Control (Real-World Scenario):**
+In industrial SCADA systems, field technicians need to upload diagnostic logs and check remote node status, but should NOT have visibility into all critical infrastructure devices or ability to perform maintenance operations. Only system administrators should manage devices, especially critical systems like NUCLEAR-CORE-CONTROLLER.
 
 **Container Commands:**
 ```bash

@@ -15,7 +15,7 @@
         <a href="{% url 'patched_upload' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Upload</a>
         <a href="{% url 'patched_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics</a>
         <a href="{% url 'patched_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check</a>
-        <a href="{% url 'monitoring_filtered' filter_path='patched' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Security Logs</a>
+        <a href="{% url 'monitoring_filtered' filter_path='patched' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Logs (SOC)</a>
         <a href="{% url 'patched_login' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Logout</a>
     </div>
 </div>
@@ -60,6 +60,22 @@
         </thead>
 
         <tbody>
+          {% if access_denied_message %}
+          <tr>
+            <td colspan="5" style="text-align: center; padding: 40px 20px;">
+              <div style="display: inline-block; background: #fef2f2; border: 2px solid #fecaca; border-radius: 12px; padding: 20px 30px; max-width: 500px;">
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
+                  <svg style="width: 24px; height: 24px; color: #dc2626;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                  </svg>
+                  <strong style="color: #991b1b; font-size: 1.1rem;">Access Restricted</strong>
+                </div>
+                <p style="margin: 0; color: #7f1d1d; font-size: 0.95rem;">{{ access_denied_message }}</p>
+                <p style="margin: 10px 0 0 0; color: #991b1b; font-size: 0.85rem;">Please contact your system administrator for elevated permissions.</p>
+              </div>
+            </td>
+          </tr>
+          {% else %}
           {% for device in devices %}
           <tr class="{% if device.is_locked_out %}row-locked{% endif %}">
             <td class="name">{{ device.name }}</td>
@@ -85,6 +101,7 @@
             <td colspan="5" class="empty">No operational devices found.</td>
           </tr>
           {% endfor %}
+          {% endif %}
         </tbody>
       </table>
     </div>

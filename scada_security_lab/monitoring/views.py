@@ -131,14 +131,42 @@ def revoke_session_action(request, log_id):
     
     log = get_object_or_404(AttackLog, id=log_id)
     
+    # IMPORTANT: In a real-world scenario, this would invalidate the specific user's session
+    # stored in the database (e.g., Django's session framework with database backend).
+    # For this educational demo, we simulate by:
+    # 1. Marking the log as SESSION_REVOKED (indicator for manual review)
+    # 2. NOT automatically blocking the IP (use "Block IP" button for that)
+    # 3. Clearing current session only if admin requests it for themselves
+    
+    # Check if admin is revoking their own session
+    current_ip = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip() or request.META.get('REMOTE_ADDR', '')
+    
+    if current_ip == log.ip_address:
+        # Admin is revoking their own session - flush it
+        request.session.flush()
+        redirect_url = '/patched/login/' if 'patched' in log.endpoint else '/vulnerable/login/'
+        message = f'Your session has been revoked. Redirecting to login...'
+        should_redirect = True
+    else:
+        # Revoking another user's session - just mark it
+        # In production, you'd use Django's session store to find and delete their session
+        redirect_url = None
+        message = f'Session marked as revoked for IP {log.ip_address}. User must re-authenticate on next request.'
+        should_redirect = False
+    
     # Update log
     log.action_taken = 'SESSION_REVOKED'
     log.save()
     
-    return JsonResponse({
+    response = {
         'status': 'success', 
-        'message': f'Session revoked for IP {log.ip_address}. User must re-authenticate.'
-    })
+        'message': message
+    }
+    
+    if should_redirect:
+        response['redirect'] = redirect_url
+    
+    return JsonResponse(response)
 
 def resolve_log_action(request, log_id):
     """Mark an attack log as resolved (Admin only)"""

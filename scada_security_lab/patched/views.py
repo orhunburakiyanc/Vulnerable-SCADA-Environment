@@ -46,27 +46,24 @@ def patched_dashboard(request):
     user_data = request.session['user']
     is_admin = user_data.get('is_admin', False)
     
-    # FIX: No SQL injection - hardcoded filters only
+    # FIX 1: Show dashboard to all authenticated users but restrict device visibility
     if is_admin:
         # Admin sees operational + maintenance devices (no locked out)
-        devices = Device.objects.filter(status__in=['Operational', 'Maintenance'], is_locked_out=False)
+        # CRITICAL: Exclude NUCLEAR devices - critical infrastructure protection
+        devices = Device.objects.filter(
+            status__in=['Operational', 'Maintenance'], 
+            is_locked_out=False
+        ).exclude(name__icontains='NUCLEAR')
     else:
-        # Regular users only see operational devices
-        devices = Device.objects.filter(status='Operational', is_locked_out=False)
+        # Regular users see empty list (no devices shown)
+        devices = []
     
-    # FIX: Mask IP addresses for non-admin users (information disclosure protection)
-    devices_list = list(devices)
-    for device in devices_list:
-        if not is_admin:
-            # Mask last two octets: 192.168.1.100 → 192.168.x.x
-            parts = device.ip_address.split('.')
-            if len(parts) == 4:
-                device.ip_address = f"{parts[0]}.{parts[1]}.x.x"
-    
+    # FIX 2: No SQL injection - hardcoded filters only (no dynamic query construction)
     context = {
-        'devices': devices_list,
+        'devices': devices,
         'user': user_data,
-        'is_admin': is_admin
+        'is_admin': is_admin,
+        'access_denied_message': None if is_admin else 'Device access is restricted to administrators only.'
     }
     return render(request, 'patched/dashboard.html', context)
 

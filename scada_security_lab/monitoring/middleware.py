@@ -110,9 +110,9 @@ class SecurityMonitorMiddleware:
         
         # =====================================================================
         # VULNERABILITY DETECTION #3 & #4: PRIVILEGE ESCALATION + SQL INJECTION
-        # Endpoint: /dashboard/
+        # Endpoint: /dashboard/ and /maintenance/
         # =====================================================================
-        # : "On the dashboard endpoint, we check for two attacks:
+        # : "On the dashboard and maintenance endpoints, we check for two attacks:
         # 
         # 1. PRIVILEGE ESCALATION - Detects 'is_admin=true' or 'is_superuser=true'
         #    in URL parameters. This catches users trying to elevate their role.
@@ -126,7 +126,7 @@ class SecurityMonitorMiddleware:
         # - SQL Injection: connector=OR, name__icontains=NUCLEAR, UNION SELECT
         # Severity: CRITICAL for both
         # =====================================================================
-        if not attack_detected and '/dashboard/' in endpoint:
+        if not attack_detected and ('/dashboard/' in endpoint or '/maintenance/' in endpoint):
             # Privilege Escalation check (most specific first)
             if re.search(r"(?i)(is_admin=true|is_admin=1|is_superuser=true|is_superuser=1)", search_space):
                 attack_detected = 'Privilege Escalation (CVE-2025-64459)'

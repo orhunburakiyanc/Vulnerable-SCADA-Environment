@@ -19,7 +19,7 @@
             <a href="{% url 'patched_upload' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Upload</a>
             <a href="{% url 'patched_deserialize' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Diagnostics</a>
             <a href="{% url 'patched_ssrf' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Node Check</a>
-            <a href="{% url 'monitoring_filtered' filter_path='patched' %}" style="text-decoration: none; color: #047857; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(16, 185, 129, 0.1); border-radius: 6px;">Security Logs</a>
+            <a href="{% url 'monitoring_filtered' filter_path='patched' %}" style="text-decoration: none; color: #047857; font-weight: 600; font-size: 0.9rem; padding: 5px 10px; background: rgba(16, 185, 129, 0.1); border-radius: 6px;">Logs (SOC)</a>
             <a href="{% url 'patched_login' %}" style="text-decoration: none; color: #991b1b; font-weight: 700; font-size: 0.9rem; padding: 5px 10px; border: 1px solid #fee2e2; border-radius: 5px; background: #fef2f2;">Logout</a>
         {% else %}
             <a href="{% url 'vulnerable_dashboard' %}" style="text-decoration: none; color: #4b5563; font-weight: 600; font-size: 0.9rem; padding: 5px 10px;">Dashboard</a>
@@ -266,7 +266,7 @@ function unblockIP(blockedId, ip) {
 }
 
 function revokeSession(logId) {
-    if (!confirm('Revoke session for this user? They will need to re-authenticate.')) return;
+    if (!confirm('Revoke session for this user? They will need to re-authenticate. If you are viewing this attack from the same session, you will be logged out.')) return;
     
     fetch('/monitoring/action/revoke/' + logId + '/', {method: 'GET'})
         .then(function(response) {
@@ -277,7 +277,12 @@ function revokeSession(logId) {
         })
         .then(function(data) {
             alert(data.message);
-            location.reload();
+            // If response includes redirect, navigate to login
+            if (data.redirect) {
+                window.location.href = data.redirect;
+            } else {
+                location.reload();
+            }
         })
         .catch(function(error) {
             console.error('Error:', error);

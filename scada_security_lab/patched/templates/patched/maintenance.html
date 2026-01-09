@@ -422,21 +422,6 @@
     </div>
     {% endif %}
   </div>
-
-  <!-- Security Improvements -->
-  <div style="background: #f0fdf4; border: 2px solid #86efac; border-radius: 12px; padding: 20px; margin-top: 30px;">
-    <h3 style="color: #047857; margin-top: 0;">Security Improvements Implemented</h3>
-    <ul style="color: #065f46; line-height: 1.8;">
-      <li><strong>CSRF Protection:</strong> {% csrf_token %} added to all forms to prevent cross-site request forgery</li>
-      <li><strong>Admin Authorization:</strong> Only administrators can access this interface</li>
-      <li><strong>Input Validation:</strong> Server-side validation for technician names (2-100 chars) and action descriptions</li>
-      <li><strong>SQL Injection Prevention:</strong> Parameterized queries and length limits on all inputs</li>
-      <li><strong>Access Control:</strong> Maintenance logs only visible to authorized administrators</li>
-      <li><strong>LOTO Compliance:</strong> Proper validation before allowing assignments to locked-out devices</li>
-      <li><strong>HTML Sanitization:</strong> All user inputs are escaped to prevent XSS attacks</li>
-      <li><strong>Error Handling:</strong> Proper HTTP status codes (403 Forbidden, 404 Not Found, 500 Internal Error)</li>
-    </ul>
-  </div>
 </div>
 
 <!-- Access Denied Modal (Shows when user is not admin - though server blocks it anyway) -->

