@@ -1,18 +1,19 @@
-# SCADA Security Assignment - Read Me Or Fail
+# Vulnerable SCADA Environment - Security Lab
 
-**Authors:** Defalt, orhunburakiyanc  
-**Date:** 2025-12-23 (Updated)  
-**Kernel:** Django 5.x on Python 3.x
+**CS437 Cybersecurity Project**  
+**Authors:** Orhun Burak Kıyanç, Mehmet Altunören, Ege Tan  
+**Technology Stack:** Django 5.0.13 (CVE-2025-64459 vulnerable), Python 3.12, Docker  
+**Repository:** [GitHub](https://github.com/orhunburakiyanc/Vulnerable-SCADA-Environment)
 
-## What is this garbage?
+## Overview
 
-This is a SCADA simulation environment. It's not real SCADA, obviously, because real SCADA runs on ancient hardware and C code that nobody has touched since 1998. This is a Python/Django web app designed to demonstrate why security matters.
+A simulated SCADA (Supervisory Control and Data Acquisition) environment demonstrating **9 critical web application vulnerabilities** commonly found in industrial control systems.
 
-I built this with three distinct components because I hate monolithic messes:
+### Three-Layer Architecture
 
-1. **`vulnerable`**: This app is a disaster. It has 11 vulnerabilities (Auth Bypass, Privilege Escalation, SQLi Scenarios 2a & 2b, IDOR [Vulnerability A], Deserialization RCE [Vulnerability B], File Upload/Overwrite [Vulnerabilities C & E], XXE [Vulnerability G], Race Condition [Vulnerability D], SSRF [Vulnerability F], Security Misconfiguration, Maintenance Interface CSRF). It's written like a junior dev's first commit on a Friday afternoon.
-2. **`patched`**: This is how code *should* be written. Input sanitization, parameterized queries, CSRF protection, session management, and proper authorization checks. It actually works.
-3. **`monitoring`**: A comprehensive security monitoring system. It detects 13 attack types, classifies severity (CRITICAL/HIGH/MEDIUM/LOW), tracks brute force attempts (5 failures/5min), and provides admin controls (block IP, revoke session, resolve incidents). Includes statistics dashboard and detailed logging.
+1. **`vulnerable/`** - Intentionally insecure implementations with 9 exploitable vulnerabilities
+2. **`patched/`** - Secure implementations with proper mitigations (CSRF protection, input validation, authorization)
+3. **`monitoring/`** - Real-time attack detection system with severity classification and admin controls
 
 ## The Architecture (Don't overcomplicate it)
 
@@ -133,98 +134,70 @@ I got tired of typing URLs manually, so I added a **Navbar** to the top of every
 * **Vulnerable App:** Red/Blue theme.
 * **Patched App:** Green theme (Secure).
 
-## How to Break It (The Vulnerable App)
+## 9 Implemented Vulnerabilities
 
-Go to these URLs (or just use the Navbar) to see bad code in action.
+### 1. Authentication Bypass (CVE-2025-64459)
+**Exploit:** `/vulnerable/login/?connector=OR&is_superuser=true`  
+**Impact:** Passwordless admin access via Django Q() connector parameter manipulation
 
-* **Auth Bypass:** `/vulnerable/login/?username=hacker&is_admin=True`
-  * *Why:* Dictionary expansion in `request.GET`. It trusts whatever you put in the URL.
-  * *Impact:* Passwordless admin access without any authentication.
+### 2. IDOR - Insecure Direct Object Reference
+**Exploit:** `/vulnerable/report/?id=103` (enumerate 103-153)  
+**Impact:** Access any user's diagnostic reports without authorization
 
-* **Privilege Escalation:** `/vulnerable/dashboard/?is_admin=true` (after normal user login)
-  * *Why:* URL parameters can overwrite session data.
-  * *Impact:* Regular users can gain admin privileges via URL manipulation.
+### 3. Insecure Deserialization (RCE)
+**Exploit:** `/vulnerable/deserialize/` - Upload malicious pickle payload  
+**Impact:** Remote code execution via `__reduce__()` method  
+**Verify:** `docker compose exec web cat /tmp/pwned.txt`
 
-* **SQL Injection - Scenario 2a (Dashboard - Locked Device Revelation):** `/vulnerable/dashboard/?connector=OR&is_locked_out=True`
-  * *Why:* Dynamic query building with user-controlled connector logic allows bypassing default filters.
-  * *Impact:* Reveals locked-out devices including **"NUCLEAR-CORE-CONTROLLER"** with **Red Background** and 🔒 locked status.
-  * *Admin Only:* Requires admin privileges (chain with Auth Bypass or Privilege Escalation).
+### 4. File Overwrite
+**Exploit:** `/vulnerable/upload/` - Upload file with existing name  
+**Impact:** Overwrite production files without versioning
 
-* **SQL Injection - Scenario 2b (Maintenance - NUCLEAR Discovery):** `/vulnerable/maintenance/?connector=OR&name__icontains=NUCLEAR`
-  * *Why:* Similar ORM filter bypass in maintenance interface allows revealing hidden NUCLEAR devices.
-  * *Impact:* Bypasses need-to-know security policy, exposes critical infrastructure in maintenance mode.
-  * *Admin Only:* Requires admin privileges.
+### 5. Unrestricted File Upload
+**Exploit:** Upload `.php`, `.exe`, `.sh`, `.py` files  
+**Impact:** Web shell installation, backdoor deployment
 
-* **IDOR (Insecure Direct Object Reference) [Vulnerability A - CWE-639]:** `/vulnerable/report/?id=103`
-  * *Why:* No authorization check on report access. Enumerate IDs 103-153 to access all diagnostic reports including admin secrets.
-  * *Exploit:* `for i in {103..153}; do curl "http://localhost:8000/vulnerable/report/?id=$i" -o "report_$i.pdf"; done`
+### 6. XXE Injection
+**Exploit:** Upload XML with `<!ENTITY xxe SYSTEM "file:///etc/passwd">`  
+**Impact:** Read local files (`/etc/passwd`, `/etc/hostname`)
 
-* **File Upload/Overwrite [Vulnerabilities C & E - CWE-434]:** `/vulnerable/upload/`
-  * *Why:* No filename sanitization or file type validation. Same filename overwrites previous file. Upload `diagnostic_script.txt` or dangerous file types (.php, .sh, .py).
-  * *Impact:* Backdoor installation, production script replacement, no file versioning, unrestricted upload of dangerous file types.
+### 7. SSRF - Server-Side Request Forgery
+**Exploit:** `/vulnerable/ssrf/?url=http://127.0.0.1:8000/admin/`  
+**Impact:** Access internal services, cloud metadata (169.254.169.254)
 
-* **XXE (XML External Entity) [Vulnerability G - CWE-611]:** `/vulnerable/upload/`
-  * *Why:* `resolve_entities=True` in the XML parser. Upload malicious XML to read local files like `/etc/passwd`, `/etc/hostname`, or container files.
-  * *Example Output:* Full system user list including root, daemon, www-data accounts. Successful file reads even when XML parsing appears to fail.
+### 8. Privilege Escalation + SQL Injection
+**Exploit:** `/vulnerable/dashboard/?connector=OR&name__icontains=NUCLEAR`
+**Exploit:** `/vulnerable/dashboard/?is_admin=true`
+**Impact:** Reveal hidden NUCLEAR-CORE-CONTROLLER device via ORM filter bypass
 
-* **Deserialization RCE [Vulnerability B - CWE-502]:** `/vulnerable/deserialize/`
-  * *Why:* Accepts Base64 encoded `pickle` data without validation. RCE via `__reduce__()` method.
-  * *Exploit:* Upload malicious pickle file to execute arbitrary commands, verify with `docker compose exec web cat /tmp/pwned.txt`. Corrupted payloads can crash the server.
+### 9. Unsafe Temporary Files (Race Condition)
+**Exploit:** Parallel requests to `/vulnerable/report/?id=1` and `?id=103`  
+**Impact:** Information disclosure via shared temp file `/tmp/scada_report_temp.pdf`
 
-* **Race Condition [Vulnerability D - CWE-377 - Unsafe Temp Files]:** `/vulnerable/report/`
-  * *Why:* Uses predictable static filename `/tmp/scada_report_temp.pdf` for all reports. Concurrent requests can overwrite each other's data, causing information disclosure.
-  * *Impact:* User A's sensitive report data may leak to User B if requests are timed correctly.
+## Patched Implementations
 
-* **SSRF (Server-Side Request Forgery) [Vulnerability F - CWE-918]:** `/vulnerable/ssrf/`
-  * *Why:* No URL validation before `urllib.request.urlopen()`. Server makes arbitrary requests to attacker-controlled URLs.
-  * *Exploit:* Access internal services (`http://127.0.0.1:8000/admin/`), scan internal network, exfiltrate data via webhook.site, access cloud metadata endpoints.
+Secure versions at `/patched/` endpoints:
 
-* **Security Misconfiguration - Unauthorized Monitoring Logs Access:** 
-  * *Why:* OWASP A05:2021 - Security oversight where `/monitoring/` endpoint lacks authorization checks, allowing any user to access sensitive attack logs.
-  * *Impact:* Information disclosure of attacker IPs, attack patterns, system vulnerabilities, blocked IPs, and security events. Enables reconnaissance for future attacks.
-  * *Additional Issue:* DEBUG mode enabled shows detailed error pages with SECRET_KEY, database paths, environment variables on authentication failures.
-  * *Fix in Patched:* Admin-only access to monitoring dashboard with proper authorization checks.
+- **Login:** POST-only, Django `authenticate()`, no URL parameters
+- **Dashboard:** Hardcoded filters, no dynamic Q() objects
+- **Upload:** UUID filenames, extension whitelist, XXE disabled
+- **Deserialization:** JSON instead of pickle
+- **SSRF:** Domain allowlist only
+- **Reports:** No temp files, ownership verification
+- **CSRF Protection:** All state-changing operations
 
-* **Maintenance Interface CSRF/Authorization:** `/vulnerable/maintenance/`
-  * *Why:* OWASP A01:2021 + A05:2021 + A07:2021 - Missing server-side authorization check (only client-side redirect).
-  * *Vulnerability:* Regular users see popup and redirect, but can bypass with JavaScript disabled or Burp Suite interception.
-  * *Features:* Lockout/Tagout (LOTO) status tracking, technician assignment, maintenance logs viewer, statistics dashboard.
-  * *Additional Flaws:*
-    - @csrf_exempt on assign_technician and toggle_status (CSRF attacks possible)
-    - No admin check on assign_technician (any logged user can modify if JS bypassed)
-    - Information disclosure (maintenance data sent even to non-admin users)
-  * *Exploit:* Disable JavaScript, intercept request with Burp, or create malicious HTML form for CSRF.
-  * *Fix in Patched:* `/patched/maintenance/` requires admin authentication, CSRF protection enabled, input validation, LOTO compliance checks.
+## Monitoring System
 
-## How to Verify It Works (The Patched App)
+Real-time attack detection middleware: `/monitoring/`
 
-Go here to see the fixes.
+**Features:**
+- **13 Attack Patterns:** Auth Bypass, SQL Injection, XXE, File Upload, IDOR, Deserialization, SSRF, Path Traversal, Brute Force, Directory Scanning, Cookie Manipulation
+- **Severity Levels:** CRITICAL (RCE/Auth Bypass), HIGH (SQLi/XXE), MEDIUM (scanning), LOW
+- **Brute Force Detection:** 7+ attempts/min (HIGH), 10+ attempts/min (CRITICAL)
+- **Admin Actions:** Block IP, Revoke Session, Resolve Incident
+- **Auto-blocking:** Configurable via `ENABLE_AUTO_BLOCKING` (disabled for demos)
 
-* **Secure Login:** `/patched/login/`
-  * *Fix:* Explicit field lookup. Also, I fixed the **Logout** bug—it now actually flushes the session when you hit logout.
-
-* **Secure Dashboard:** `/patched/dashboard/`
-  * *Fix:* Hardcoded filters. You can't inject OR conditions anymore.
-
-* **Secure SSRF:** `/patched/ssrf/`
-  * *Fix:* **Allowlist**. You can only connect to `example.com` or `scada-update-server.com`. Everything else is blocked.
-
-* **Secure Diagnostics:** `/patched/diagnostics/`
-  * *Fix:* Switched from `pickle` to **JSON**. You can't execute code via JSON.
-
-## The Monitoring System
-
-Check `/monitoring/` for comprehensive security operations. Features:
-
-* **Attack Detection:** 13 attack types (Auth Bypass, SQL Injection, XXE, File Upload, IDOR, Deserialization, SSRF, XSS, Path Traversal, Command Injection, Brute Force, Directory Scanning, Cookie Manipulation)
-* **Severity Classification:** CRITICAL (RCE/Auth Bypass), HIGH (SQLi/XXE), MEDIUM (scanning), LOW (normal activity)
-* **Brute Force Detection:** 5 failed login attempts within 5 minutes triggers CRITICAL alert
-* **Admin Actions:** Block IP, Unblock IP, Revoke Session, Resolve Incident (requires admin authentication)
-* **Statistics Dashboard:** Real-time counts for Critical Alerts, High Severity, Unresolved Incidents, Blocked IPs
-* **Filters:** By severity, resolution status, attack type
-* **Auto-blocking:** Configurable via `ENABLE_AUTO_BLOCKING` flag (disabled for demos)
-
-**Security Misconfiguration Demo:** `/monitoring/` is accessible without admin check (vulnerability), while `/monitoring/patched/` requires authentication (fixed).
+**Demo:** `/monitoring/` lacks auth (misconfiguration), `/monitoring/patched/` requires admin
 
 ## Final Note
 
